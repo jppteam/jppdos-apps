@@ -1,0 +1,12 @@
+{
+  "schema_version": 2,
+  "app_id": "slots",
+  "app_type": "native",
+  "name": "Slots",
+  "version": "2.0.0",
+  "author": "evaqum",
+  "sdk_min": 1,
+  "sdk_max": 1,
+  "entry": "slots.bin",
+  "capabilities": []
+}

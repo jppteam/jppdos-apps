@@ -1,0 +1,4 @@
+[submodule "vendor/jppdos"]
+	path = vendor/jppdos
+	url = git@git.nova.tokyo:jppdevice/jppdos.git
+	branch = master
