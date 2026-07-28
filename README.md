@@ -127,8 +127,7 @@ built-in WebDAV server (`Settings → WebDAV server`).
 ## Examples and boilerplates
 
 **The reference corpus lives in the firmware repo, not here.** Example apps sit
-under `apps/` in the [firmware repo][fw-repo] — or `vendor/jppdos/apps/` in your
-clone, if you initialised the submodule — because they are rebuilt on every
+under `apps/` in the [firmware repo][fw-repo], because they are rebuilt on every
 firmware build and so cannot fall behind the SDK surface they demonstrate. Start
 by copying whichever matches what you want to write:
 
@@ -165,9 +164,11 @@ rebuilt from the firmware repo's `docs/` tree on every change to it.
 | Writing a MicroPython app | [MicroPython guide][docs-mp] |
 | What `deploy.py` speaks | [Serial protocol][docs-serial] |
 
-The site tracks the firmware's `master`. For docs matched to the exact revision
-you are building against, read the Markdown straight off disk under
-`vendor/jppdos/docs/` once the submodule is initialised.
+The site tracks the firmware's `master`, which is also what the SDK image is
+built from — so the two match. For docs pinned to an older image, read the
+Markdown under `docs/` in a [firmware repo][fw-repo] checkout at the revision
+that image records (`docker run --rm --entrypoint cat jppd-app-sdk
+/opt/jppd-sdk/firmware-rev`).
 
 ## Adding a new app
 
@@ -231,17 +232,19 @@ already on the include path; pull one in via `extra_sources` in `jppd-app.json`.
 
 Only needed when the firmware's SDK surface changes and the image has to be
 rebuilt against it — app authors never do this. It requires the firmware
-sources, which come from the submodule:
+sources, but **this repository does not vendor them**: the Dockerfile clones
+them itself, so there is nothing to check out or keep in step.
 
 ```bash
-git submodule update --init --recursive --remote
-docker build -f toolchain/Dockerfile -t jppd-app-sdk .
+toolchain/build-image.sh
 ```
 
-The submodule tracks the firmware's `master` branch rather than a pinned tag —
-`--remote` moves it to the current tip. The SDK surface changes between firmware
-revisions, so rebuild the image after moving it. Details, including why the
-image is ~340 MB rather than ~12 GB, are in
+That resolves the current tip of the firmware's `master` and builds against it —
+there is no pinned revision in git to move first. `JPPDOS_REF` builds against a
+specific branch, tag, or commit instead; the resolved revision is baked into the
+image at `/opt/jppd-sdk/firmware-rev`. The SDK surface changes between firmware
+revisions, so rerun it whenever you want the image to catch up. Details,
+including why the image is ~340 MB rather than ~12 GB, are in
 [`toolchain/README.md`](toolchain/README.md).
 
 
