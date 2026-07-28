@@ -20,6 +20,18 @@ This repository contains apps for  **J++Device Operating System**, plus the tool
    between sessions. Any key skips a celebration, CENTER during one re-spins
    straight away, and a long CENTER press exits.
 
+2. **MTProto (skeleton)** by jppdos
+   Native, ID: `mtproto`
+
+   A partial Telegram MTProto client — a skeleton that measures the envelope
+   rather than a usable messenger. It opens an abridged TCP transport, completes
+   the PQ/Diffie-Hellman auth-key handshake, and frames MTProto 2.0 encrypted
+   messages, all on the SDK's own crypto primitives so none of the AES or bignum
+   code has to fit in the app pool. Handshake parsing is deliberately reduced to
+   the fields the flow actually consumes. Its point is the footprint: about 11 KB
+   of the 64 KB pool, which is what establishes that a real minimal client would
+   fit. Requires firmware with `sdk_min: 2`.
+
 -----
 
 # Getting the apps
@@ -71,8 +83,8 @@ pip install pyserial
 Select apps to deploy  (dist/)
 ↑/↓ move · SPACE toggle · a all · ENTER confirm · q cancel
 
-[x] testapp_native     SDK Test (C)     native       v1.0.0    2 files, 39.5 KB
-[ ] testapp_mp         SDK Test (MP)    micropython  v1.0.0    2 files, 9.4 KB
+[x] slots              Slots            native       v1.0.0    2 files, 44.1 KB
+[ ] mtproto            MTProto (skele…  native       v0.1.0    2 files, 11.8 KB
 ```
 
 Then press **Allow** on the device when the consent dialog appears. Files land in

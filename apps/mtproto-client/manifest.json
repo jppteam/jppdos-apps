@@ -1,0 +1,12 @@
+{
+  "schema_version": 2,
+  "app_id": "mtproto-client",
+  "app_type": "native",
+  "name": "MTProto Client",
+  "version": "0.1.0",
+  "author": "jppdos",
+  "sdk_min": 2,
+  "entry": "mtproto.bin",
+  "background": { "enabled": false },
+  "capabilities": ["network.connect"]
+}
