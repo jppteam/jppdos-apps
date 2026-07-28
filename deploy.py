@@ -8,7 +8,7 @@ everything inside a single consent-gated session (one Allow press for the whole
 batch).
 
     ./deploy.py                          # pick apps + port interactively
-    ./deploy.py testapp_native           # deploy one app, auto-discover the port
+    ./deploy.py slots                    # deploy one app, auto-discover the port
     ./deploy.py --all --port /dev/ttyACM0
     ./deploy.py --dist dist --list       # just show what's deployable
 
@@ -532,7 +532,7 @@ def main() -> int:
         epilog=(
             "Examples:\n"
             "  ./deploy.py                            pick apps + port interactively\n"
-            "  ./deploy.py testapp_native             one app, auto-discovered port\n"
+            "  ./deploy.py slots                      one app, auto-discovered port\n"
             "  ./deploy.py --all --port /dev/ttyACM0  every built app, explicit port\n"
             "  ./deploy.py --list                     show what is deployable\n"
         ),
@@ -568,7 +568,7 @@ def main() -> int:
     if not apps:
         print(f"Error: no built apps found under {args.dist}/.\n"
               f"Build one first, e.g.:\n"
-              f"  docker run --rm -v \"$PWD/apps/testapp_native:/app\" jppd-app-sdk",
+              f"  docker run --rm -v \"$PWD/apps/slots:/app\" jppd-app-sdk",
               file=sys.stderr)
         return 1
 

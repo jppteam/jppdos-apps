@@ -161,7 +161,7 @@ toolchain / `mpy-cross` are on `PATH`:
 
 ```bash
 JPPD_SDK_ROOT=vendor/jppdos JPPD_SDK_BUILD=vendor/jppdos/build \
-    toolchain/jppd-build --app-dir apps/testapp_native --dry-run
+    toolchain/jppd-build --app-dir apps/slots --dry-run
 ```
 
 | Env var          | Default                    | Meaning                          |

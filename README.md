@@ -33,7 +33,7 @@ image and mount your app directory on it.
 
 ```bash
 # from an app source directory (the one holding manifest.json)
-cd apps/testapp_native
+cd apps/slots
 docker run --rm -v "$PWD:/app" jppd-app-sdk
 ```
 
@@ -88,8 +88,8 @@ devices first. On macOS the redundant `/dev/tty.*` twin of each port is hidden.
 Everything the TUI does is also reachable from flags, for scripts and CI:
 
 ```bash
-./deploy.py testapp_native                    # one app, auto-discovered port
-./deploy.py testapp_native testapp_mp         # several
+./deploy.py slots                             # one app, auto-discovered port
+./deploy.py slots mtproto                     # several
 ./deploy.py --all --port /dev/ttyACM0         # everything under dist/
 ./deploy.py --dist build/apps --all           # a different build output root
 ./deploy.py --list                            # show deployable apps + ports, exit
@@ -126,22 +126,29 @@ built-in WebDAV server (`Settings → WebDAV server`).
 
 ## Examples and boilerplates
 
-The apps in this repo are the reference corpus — start by copying whichever
-matches the language you want.
+**The reference corpus lives in the firmware repo, not here.** Example apps sit
+under `apps/` in the [firmware repo][fw-repo] — or `vendor/jppdos/apps/` in your
+clone, if you initialised the submodule — because they are rebuilt on every
+firmware build and so cannot fall behind the SDK surface they demonstrate. Start
+by copying whichever matches what you want to write:
 
 | App | ID | Type | What it is |
 |---|---|---|---|
 | SDK Test (C) | `testapp_native` | native | Menu-driven exercise of every App SDK capability — storage, KV, UI helpers, canvas, buzzer, LED, HTTP, BLE, ESP-NOW, background tasks. The reference for what a native app can do, and the closest thing to a native boilerplate. |
 | SDK Test (MP) | `testapp_mp` | micropython | The same coverage from MicroPython, through the `jppsdk` module. |
+| Games | `games` | native | A hub that pages game modules into the app pool on demand — the reference for code modules. |
+| DemoScene | `demoscene` | native | Fullscreen canvas effects, integer-only maths, async buzzer music. |
+| MeetApp | `meetapp` | native | BLE contact exchange with Ed25519 identity and multi-party signing. |
 
-Both declare the full capability set, so launching them exercises the
-permission-prompt flow as well. That is deliberate for a test app and a bad
-default for a real one — declare only what you actually call (see below).
+The two SDK test apps declare the full capability set, so launching them
+exercises the permission-prompt flow as well. That is deliberate for a test app
+and a bad default for a real one — declare only what you actually call (see
+below).
 
-Larger, more realistic apps ship with the firmware rather than here: Games (a
-native hub that pages game modules in on demand), DemoScene, and MeetApp (BLE
-contact exchange with Ed25519 identity) live under `apps/` in the
-[firmware repo][fw-repo], or `vendor/jppdos/apps/` in your clone.
+The apps *in this repo* (`slots`, `mtproto`) are finished standalone apps rather
+than SDK demonstrations, and both are native — for a MicroPython starting point
+use `testapp_mp` from the firmware repo. Copying one of these works too; they
+are laid out exactly as this repo expects a new app to be.
 
 ## App SDK documentation
 
@@ -202,11 +209,15 @@ A few things worth getting right before you open a PR:
   the name of your storage roots on the SD card, `/sd/apps/<app_id>/` and
   `/sd/shared/<app_id>/`.
 - **Declare only the capabilities you call.** Tier-1 caps (`http.request`,
-  `ble.scan`, `ble.advertise`, `esp_now`, `background.register`) prompt once and
-  persist; tier-2 (`files.full`, `network.bind`, `ble.connect`, `ble.host`)
-  prompt on first use every launch. Undeclared caps are refused outright, and a
-  large chunk of the SDK — storage, KV, IPC, UI, canvas, buzzer, LED — needs no
-  declaration at all. The full tier table is in `docs/manifest.md`.
+  `https.request`, `ble.scan`, `ble.advertise`, `esp_now`, `background.register`)
+  prompt once and persist; tier-2 (`files.full`, `network.bind`,
+  `network.connect`, `ble.connect`, `ble.host`) prompt on first use every launch.
+  Two of them prompt a second time, scoped to the resource rather than the
+  capability: `files.full` asks per path, and `https.request` asks per origin
+  (that one persists, so a given host is approved once and never again).
+  Undeclared caps are refused outright, and a large chunk of the SDK — storage,
+  KV, IPC, UI, canvas, buzzer, LED — needs no declaration at all. The full tier
+  table is in [`docs/manifest.md`][docs-manifest].
 - **The manifest is validated on every build** by the firmware's own validator,
   so a schema mistake fails the build rather than the device.
 - **Test on hardware, not just on a build.** Build, `./deploy.py`, and confirm

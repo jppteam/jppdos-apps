@@ -17,7 +17,7 @@ mpy-cross, and a firmware build tree.
 
     # directly, pointing at a local firmware build (the vendor/ submodule):
     JPPD_SDK_ROOT=vendor/jppdos JPPD_SDK_BUILD=vendor/jppdos/build \
-        toolchain/jppd-build --app-dir apps/testapp_native --dry-run
+        toolchain/jppd-build --app-dir apps/slots --dry-run
 
 The SDK sysroot is located via environment variables (all defaulting to the
 in-image layout):
@@ -78,7 +78,7 @@ COMPILE_FLAGS = [
 ]
 LINK_FLAGS = ["-shared", "-mno-relax", "-nostdlib", "-Wl,--allow-shlib-undefined"]
 
-# MicroPython bytecode target (mpy-cross), mirrors apps/testapp_mp/build_mp.py.
+# MicroPython bytecode target (mpy-cross), mirrors the firmware repo's apps/testapp_mp/build_mp.py.
 MPY_ARCH = "rv32imc"
 
 
