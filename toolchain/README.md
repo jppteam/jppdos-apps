@@ -18,28 +18,55 @@ section applies to you, and you never need the firmware sources.
 needs the firmware sources: `capture_sysroot.py` distills the sysroot out of a
 *real* firmware build — `build/compile_commands.json` for the include closure,
 plus generated headers such as `sdkconfig.h` — none of which can be synthesised
-without compiling the firmware. Those sources come from the `vendor/jppdos`
-submodule of this repository, which tracks the firmware's `master` branch:
+without compiling the firmware.
+
+This repository does **not** vendor those sources — there is no submodule and no
+firmware checkout. The Dockerfile clones them in its builder stage, and
+`build-image.sh` decides which revision to clone. Run it from the **repository
+root** (the whole repo is the build context):
 
 ```bash
-git submodule update --init --recursive --remote
+toolchain/build-image.sh
 ```
 
-Then build from the **repository root** (the whole repo is the build context):
+That builds against the current tip of the firmware's `master`. To build against
+something else, set `JPPDOS_REF` to any branch, tag, or commit:
 
 ```bash
-docker build -f toolchain/Dockerfile -t jppd-app-sdk .
+JPPDOS_REF=1.0-RTM toolchain/build-image.sh
+IMAGE_TAG=jppd-app-sdk:rtm JPPDOS_REF=1.0-RTM toolchain/build-image.sh
 ```
 
-The image is **version-locked** to the firmware revision the submodule points
-at (headers and the SDK surface change between releases). Tag it with the
-matching `JPPDOS_VERSION` — see `vendor/jppdos/main/jpp_settings_screen.h` — and
-rebuild whenever the SDK surface changes:
+Extra arguments are forwarded to `docker build` (`--no-cache`, `--platform`, …),
+and `JPPDOS_REPO` overrides the firmware git URL if you are building from the
+internal mirror rather than the public one.
+
+The image is still **version-locked** to whatever revision it was built from —
+headers and the SDK surface change between revisions — but locked at *build*
+time rather than in git. Every image records its own provenance, so you can
+always recover which firmware an SDK image matches:
 
 ```bash
-docker build -f toolchain/Dockerfile \
-    -t jppd-app-sdk:$(grep -oE '"[^"]+"' vendor/jppdos/main/jpp_settings_screen.h | head -1) .
+docker run --rm --entrypoint cat jppd-app-sdk /opt/jppd-sdk/firmware-rev
+docker inspect -f '{{ index .Config.Labels "org.jppdevice.firmware-rev" }}' jppd-app-sdk
 ```
+
+### Why a wrapper script and not just `docker build`
+
+`build-image.sh` resolves `JPPDOS_REF` to a concrete commit with `git ls-remote`
+*before* invoking docker, and passes it in as the `JPPDOS_REV` build arg. That
+one indirection buys both halves of what you want:
+
+- **Always latest.** The arg value changes the moment the ref moves, so the
+  `RUN git clone` layer is invalidated automatically. Cloning a moving ref
+  directly would keep serving a layer cached from whenever you last built, and
+  "latest" would silently rot — the same failure mode the submodule had, just
+  hidden in the Docker cache instead of in `git status`.
+- **Still reproducible.** The build is pinned to one exact commit, and that
+  commit is recorded in the image.
+
+`docker build -f toolchain/Dockerfile -t jppd-app-sdk .` still works and takes
+the tip of `master`, but without the cache guarantee. Prefer the script.
 
 The build is **multi-stage**: the builder stage runs a full firmware build on
 `espressif/idf:v5.5.1`, then the final stage starts from `python:3.12-slim` and
@@ -160,7 +187,7 @@ already run `idf.py build`) and it works on the host, provided the riscv
 toolchain / `mpy-cross` are on `PATH`:
 
 ```bash
-JPPD_SDK_ROOT=vendor/jppdos JPPD_SDK_BUILD=vendor/jppdos/build \
+JPPD_SDK_ROOT=../jppdos JPPD_SDK_BUILD=../jppdos/build \
     toolchain/jppd-build --app-dir apps/slots --dry-run
 ```
 

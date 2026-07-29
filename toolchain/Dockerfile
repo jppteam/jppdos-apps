@@ -8,13 +8,20 @@
 # go straight to `docker run`. Only whoever *publishes* the image builds it, and
 # that build needs the firmware sources — the sysroot is distilled from a real
 # firmware build (compile_commands.json + generated headers such as sdkconfig.h),
-# which cannot be synthesised without one. Those sources come from the
-# `vendor/jppdos` submodule of this repository:
+# which cannot be synthesised without one.
 #
-#     git submodule update --init --recursive --remote
+# Those sources are CLONED AT IMAGE-BUILD TIME, not vendored: this repository has
+# no submodule and no firmware checkout. The SDK has to track the firmware's
+# master, and a submodule pointer only tracks it as often as somebody remembers
+# to move it. Use the wrapper, which resolves the tip for you:
 #
-# The image is VERSION-LOCKED to the firmware revision the submodule points at
-# (see vendor/jppdos/main/jpp_settings_screen.h for JPPDOS_VERSION).
+#     toolchain/build-image.sh                      # tip of firmware master
+#     JPPDOS_REF=1.0-RTM toolchain/build-image.sh   # a specific tag/branch/commit
+#
+# The image is still VERSION-LOCKED — to whatever revision it was built from,
+# recorded in /opt/jppd-sdk/firmware-rev inside the image and in the
+# org.jppdevice.firmware-rev label. It is just locked at build time rather than
+# in git.
 #
 # --- Why multi-stage -------------------------------------------------------
 # espressif/idf:v5.5.1 is ~12 GB (2.9 GB IDF sources, 3.6 GB of toolchains for
@@ -24,7 +31,7 @@
 # stage starts from python-slim and copies in just the compiler + those headers.
 #
 # Build (from the repository ROOT, which is the build context):
-#     docker build -f toolchain/Dockerfile -t jppd-app-sdk .
+#     toolchain/build-image.sh
 #
 # Use (from an app source directory):
 #     docker run --rm -v "$PWD:/app" jppd-app-sdk
@@ -46,8 +53,30 @@ RUN git clone --depth 1 --branch v1.28.0 \
     && cp /tmp/micropython/mpy-cross/build/mpy-cross /usr/local/bin/mpy-cross \
     && rm -rf /tmp/micropython
 
-# The firmware checkout — the vendor/jppdos submodule of this repository.
-COPY vendor/jppdos /project
+# The firmware checkout, cloned rather than vendored (see the header).
+#
+# JPPDOS_REV is the commit build-image.sh resolved from JPPDOS_REF just before
+# invoking docker. Passing it explicitly does two jobs at once: it pins the
+# build to one exact revision even though the ref moves, and — because the ARG
+# value changes whenever the ref moves — it invalidates the layer cache by
+# itself, so "latest" never silently serves a stale clone. Building without it
+# takes the tip of JPPDOS_REF and may hit a cached layer.
+ARG JPPDOS_REPO=https://github.com/jppteam/jppdos.git
+ARG JPPDOS_REF=master
+ARG JPPDOS_REV=
+# The clone deliberately takes no --branch: a blobless clone of every ref is
+# cheap and lets the checkout below accept a branch, a tag, or a raw commit
+# SHA uniformly (--branch would reject the last).
+RUN git clone --filter=blob:none "$JPPDOS_REPO" /project \
+    && git -C /project checkout --detach "${JPPDOS_REV:-$JPPDOS_REF}" \
+    && git -C /project submodule update --init --recursive \
+    && { echo "repo:    $JPPDOS_REPO"; \
+         echo "ref:     $JPPDOS_REF"; \
+         echo "rev:     $(git -C /project rev-parse HEAD)"; \
+         echo "describe:$(git -C /project describe --tags --always)"; \
+         echo "built:   $(date -u +%Y-%m-%dT%H:%M:%SZ)"; } > /firmware-rev \
+    && cat /firmware-rev
+
 COPY toolchain/capture_sysroot.py /project/tools/capture_sysroot.py
 WORKDIR /project
 RUN . "$IDF_PATH/export.sh" \
@@ -95,9 +124,15 @@ COPY --from=builder /usr/local/bin/mpy-cross /usr/local/bin/mpy-cross
 # The builder script, the firmware's manifest validator, and this repo's own
 # deploy tool (jppd-build shells out to it for --upload).
 COPY toolchain/jppd-build /usr/local/bin/jppd-build
-COPY vendor/jppdos/tests/validate_manifests.py /project/tests/validate_manifests.py
+COPY --from=builder /project/tests/validate_manifests.py /project/tests/validate_manifests.py
 COPY deploy.py /opt/jppd-sdk/deploy.py
 RUN chmod 0755 /usr/local/bin/jppd-build
+
+# Which firmware revision this image was built from. The submodule used to
+# record that in git; now the image records it about itself.
+COPY --from=builder /firmware-rev /opt/jppd-sdk/firmware-rev
+ARG JPPDOS_REV=
+LABEL org.jppdevice.firmware-rev=$JPPDOS_REV
 
 ENV JPPD_SDK_ROOT=/project
 ENV JPPD_SDK_FLAGS=/opt/jppd-sdk/sdk-flags.json

@@ -15,8 +15,8 @@ mpy-cross, and a firmware build tree.
     docker run --rm -v "$PWD:/app" jppd-app-sdk
     docker run --rm -v "$PWD:/app" --device /dev/ttyACM0 jppd-app-sdk --upload /dev/ttyACM0
 
-    # directly, pointing at a local firmware build (the vendor/ submodule):
-    JPPD_SDK_ROOT=vendor/jppdos JPPD_SDK_BUILD=vendor/jppdos/build \
+    # directly, pointing at your own firmware checkout that has been built:
+    JPPD_SDK_ROOT=../jppdos JPPD_SDK_BUILD=../jppdos/build \
         toolchain/jppd-build --app-dir apps/slots --dry-run
 
 The SDK sysroot is located via environment variables (all defaulting to the
