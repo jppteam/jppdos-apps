@@ -20,17 +20,31 @@ This repository contains apps for  **J++Device Operating System**, plus the tool
    between sessions. Any key skips a celebration, CENTER during one re-spins
    straight away, and a long CENTER press exits.
 
-2. **MTProto (skeleton)** by jppdos
-   Native, ID: `mtproto`
+2. **MTProto** by jppdos
+   Native, ID: `mtproto-client`
 
-   A partial Telegram MTProto client — a skeleton that measures the envelope
-   rather than a usable messenger. It opens an abridged TCP transport, completes
-   the PQ/Diffie-Hellman auth-key handshake, and frames MTProto 2.0 encrypted
-   messages, all on the SDK's own crypto primitives so none of the AES or bignum
-   code has to fit in the app pool. Handshake parsing is deliberately reduced to
-   the fields the flow actually consumes. Its point is the footprint: about 11 KB
-   of the 64 KB pool, which is what establishes that a real minimal client would
-   fit. Requires firmware with `sdk_min: 2`.
+   A Telegram client. It speaks MTProto 2.0 for real: the intermediate TCP
+   transport, the PQ/Diffie-Hellman handshake with RSA_PAD and checked DH
+   parameters, encrypted message framing with msg_key verification, containers,
+   gzipped bodies, salt and clock corrections, and live updates on the open
+   connection. The login flow follows the mobile clients' — phone number, code,
+   and a two-step password over SRP-2048 when the account has one — and the auth
+   key is kept on the SD card so it happens once.
+
+   The interface is drawn pixel by pixel, because the SDK has no text primitive:
+   a 5×7 font covering Latin and Cyrillic, a dialog list with avatars and unread
+   badges, message bubbles with read ticks, and an on-canvas ЙЦУКЕН/QWERTY
+   keyboard, since the SDK's own text input is 64 ASCII characters and cannot
+   type a word of Russian.
+
+   Three server profiles: Telegram, j++gram, and a Custom one read from
+   `custom.conf` on the SD card (see `custom.conf.example`). Requires firmware
+   with `sdk_min: 2`.
+
+   **Not finished:** the linked image is about 85 KB against a 64 KB app pool.
+   Fitting it needs the hub-plus-module split that `docs/native/modules.md`
+   describes, and `toolchain/jppd-build` cannot build a `.mod.bin` yet. See
+   `apps/mtproto-client/NOTES.md`.
 
 -----
 

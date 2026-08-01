@@ -16,3 +16,8 @@ venv/
 
 # jppd-build output (one <app_id>/ dir per built app)
 dist/
+
+# Telegram's TL schema, fetched on demand by the MTProto client's generators.
+# Not committed: it is upstream data that would go stale in the tree, and the
+# headers generated from it are committed instead.
+apps/mtproto-client/test/tl.json
