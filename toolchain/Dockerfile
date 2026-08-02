@@ -79,7 +79,11 @@ RUN git clone --filter=blob:none "$JPPDOS_REPO" /project \
 
 COPY toolchain/capture_sysroot.py /project/tools/capture_sysroot.py
 WORKDIR /project
-RUN . "$IDF_PATH/export.sh" \
+# export.sh detects a Docker container by checking for /.dockerenv, which
+# BuildKit's RUN steps don't create (unlike a plain `docker run`). Without it,
+# export.sh falls through to its "could not detect IDF_PATH" error even though
+# IDF_PATH is set correctly; IDF_PATH_FORCE=1 tells it to trust the env var.
+RUN IDF_PATH_FORCE=1 . "$IDF_PATH/export.sh" \
     && idf.py set-target esp32c6 \
     && idf.py build
 
