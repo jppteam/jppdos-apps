@@ -79,3 +79,12 @@ void mtp_client_pump(void);
 /* Marks the connection as needing initConnection again — used after a migration
    or an explicit reconnect. */
 void mtp_client_reset_layer(void);
+
+/*
+ * Serial logging. Emits a named event to the device log (tag `app_log`) through
+ * the App SDK, for debugging the client on hardware. Safe before login: with no
+ * SDK context installed it is a no-op. jpp_sdk_log takes a single event string
+ * and no formatting, so callers that want to carry a value build it with
+ * snprintf into a small buffer first and pass that.
+ */
+void mtp_log(const char *event_name);

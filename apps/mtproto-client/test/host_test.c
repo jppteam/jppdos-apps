@@ -23,7 +23,6 @@
 #include "mtp_tl.h"
 #include "ui_font.h"
 #include "ui_gfx.h"
-#include "ui_keyboard.h"
 
 #include "skip_vectors.h"
 
@@ -614,119 +613,6 @@ static void test_wrap_agreement(void)
     CHECK(capped == 2, "max_lines ignored: drew %d", capped);
 }
 
-/* ---- Keyboard ------------------------------------------------------------ */
-
-/* Walk focus to a specific row/col so a test can "press" a named key. */
-static void kbd_focus(ui_kbd_t *k, int row, int col)
-{
-    while (k->row != row) {
-        (void)ui_kbd_key(k, JPP_SDK_KEY_DOWN);
-    }
-    k->col = col;
-}
-
-static void test_keyboard_editing(void)
-{
-    char buf[64] = { 0 };
-    ui_kbd_t k;
-    ui_kbd_init(&k, buf, sizeof(buf), "Test");
-    CHECK(k.len == 0 && k.caret == 0, "fresh buffer should be empty");
-
-    /* The Russian layer is the default, and its first row is ЙЦУКЕН. Typing the
-       first key must insert two bytes, not one. */
-    kbd_focus(&k, 0, 0);
-    CHECK(ui_kbd_key(&k, JPP_SDK_KEY_CENTER) == UI_KBD_CONTINUE, "typing continues");
-    CHECK(k.len == 2, "Cyrillic insert wrote %zu bytes, want 2", k.len);
-    CHECK(ui_utf8_len(buf) == 1, "should be one character");
-    size_t pos = 0;
-    CHECK(ui_utf8_next(buf, &pos) == 0x0439, "first RU key should be 'й'");
-
-    /* Backspace must remove the whole sequence, leaving a valid string. */
-    kbd_focus(&k, 3, 3);   /* function row, del */
-    (void)ui_kbd_key(&k, JPP_SDK_KEY_CENTER);
-    CHECK(k.len == 0, "backspace left %zu bytes", k.len);
-    CHECK(buf[0] == '\0', "buffer not terminated after backspace");
-
-    /* Backspace on an empty buffer must be a no-op, not an underflow. */
-    (void)ui_kbd_key(&k, JPP_SDK_KEY_CENTER);
-    CHECK(k.len == 0 && k.caret == 0, "backspace underflowed");
-
-    /* Shift is one-shot and uppercases Cyrillic correctly. */
-    kbd_focus(&k, 3, 0);   /* shift */
-    (void)ui_kbd_key(&k, JPP_SDK_KEY_CENTER);
-    CHECK(k.shift, "shift should latch");
-    kbd_focus(&k, 0, 0);
-    (void)ui_kbd_key(&k, JPP_SDK_KEY_CENTER);
-    CHECK(!k.shift, "shift should clear after one character");
-    pos = 0;
-    CHECK(ui_utf8_next(buf, &pos) == 0x0419, "shifted 'й' should be 'Й'");
-
-    /* OK commits, BACK cancels. */
-    kbd_focus(&k, 3, 4);
-    CHECK(ui_kbd_key(&k, JPP_SDK_KEY_CENTER) == UI_KBD_COMMIT, "OK should commit");
-    CHECK(ui_kbd_key(&k, JPP_SDK_KEY_BACK) == UI_KBD_CANCEL, "BACK should cancel");
-}
-
-static void test_keyboard_overflow(void)
-{
-    /* A buffer too small for another Cyrillic character must refuse the insert
-       rather than write one byte of a two-byte sequence. */
-    char buf[6] = { 0 };
-    ui_kbd_t k;
-    ui_kbd_init(&k, buf, sizeof(buf), NULL);
-    kbd_focus(&k, 0, 0);
-    for (int i = 0; i < 20; i++) {
-        (void)ui_kbd_key(&k, JPP_SDK_KEY_CENTER);
-    }
-    CHECK(k.len <= sizeof(buf) - 1, "len %zu exceeds capacity", k.len);
-    CHECK(buf[sizeof(buf) - 1] == '\0' || k.len < sizeof(buf),
-          "buffer not terminated");
-    /* Whatever landed must still be valid UTF-8: every character decodes and the
-       decoded length accounts for all the bytes. */
-    size_t pos = 0;
-    while (pos < k.len) {
-        CHECK(ui_utf8_next(buf, &pos) != 0xFFFD,
-              "overflow produced an invalid sequence");
-    }
-    CHECK(pos == k.len, "decode consumed %zu of %zu bytes", pos, k.len);
-}
-
-static void test_keyboard_navigation(void)
-{
-    char buf[32] = { 0 };
-    ui_kbd_t k;
-    ui_kbd_init(&k, buf, sizeof(buf), NULL);
-
-    /* Focus must stay on a real key through every layer and every wrap. */
-    for (int i = 0; i < 200; i++) {
-        jpp_sdk_key_event_t ev;
-        switch (i % 5) {
-        case 0: ev = JPP_SDK_KEY_DOWN;  break;
-        case 1: ev = JPP_SDK_KEY_RIGHT; break;
-        case 2: ev = JPP_SDK_KEY_UP;    break;
-        case 3: ev = JPP_SDK_KEY_LEFT;  break;
-        default:
-            /* Cycle the layer via the Lang key without committing. */
-            k.row = 3; k.col = 1;
-            ev = JPP_SDK_KEY_CENTER;
-            break;
-        }
-        (void)ui_kbd_key(&k, ev);
-        CHECK(k.row >= 0 && k.row < 4, "row out of range: %d", k.row);
-        CHECK(k.col >= 0, "col negative: %d", k.col);
-        CHECK(k.layer < UI_KBD_LAYER_COUNT, "layer out of range");
-    }
-
-    /* digits_only must never leave focus on a hidden row. */
-    ui_kbd_init(&k, buf, sizeof(buf), NULL);
-    k.digits_only = true;
-    for (int i = 0; i < 40; i++) {
-        (void)ui_kbd_key(&k, JPP_SDK_KEY_DOWN);
-        CHECK(k.row == 0 || k.row == 3,
-              "digits_only focused hidden row %d", k.row);
-    }
-}
-
 /* ---- TL object skipping -------------------------------------------------- */
 
 /*
@@ -962,9 +848,6 @@ int main(void)
     test_font_coverage();
     test_font_fit();
     test_wrap_agreement();
-    test_keyboard_editing();
-    test_keyboard_overflow();
-    test_keyboard_navigation();
     test_skip_vectors();
     test_skip_truncated();
     test_skip_unknown_ctor();

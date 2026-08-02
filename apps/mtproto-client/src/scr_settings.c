@@ -17,6 +17,8 @@
 #include "ui_gfx.h"
 #include "ui_widgets.h"
 
+#pragma GCC visibility push(hidden)
+
 typedef enum {
     SET_ACCOUNT = 0,
     SET_SERVER,
@@ -146,6 +148,7 @@ void scr_settings_key(jpp_sdk_key_event_t ev)
         }
         ui_toast("Signing out");
         mtp_app_render_now();
+        mtp_log("logout");
         (void)mtp_login_log_out();
         mtp_app_goto(SCR_WELCOME);
         return;
@@ -155,3 +158,5 @@ void scr_settings_key(jpp_sdk_key_event_t ev)
         return;
     }
 }
+
+#pragma GCC visibility pop

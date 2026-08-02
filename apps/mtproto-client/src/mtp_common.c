@@ -1,5 +1,7 @@
 #include "mtp_common.h"
 
+#pragma GCC visibility push(hidden)
+
 const char *mtp_err_str(mtp_err_t err)
 {
     switch (err) {
@@ -110,3 +112,5 @@ bool mtp_parse_u32(const char *s, uint32_t *out)
     *out = v;
     return true;
 }
+
+#pragma GCC visibility pop

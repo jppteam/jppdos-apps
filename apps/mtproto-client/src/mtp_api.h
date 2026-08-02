@@ -5,17 +5,23 @@
  * response into mtp_model. Callers get a status, not bytes.
  *
  * Page sizes are small on purpose. A phone asks for 100 dialogs at a time; here
- * the uncompressed response has to fit MTP_INFLATE_MAX, and the screen shows four
- * rows. Asking for what fits is cheaper than discovering it does not.
+ * the uncompressed response has to fit MTP_INFLATE_MAX and the compressed frame
+ * has to fit MTP_RX_MAX, and the screen shows four rows. Asking for what fits is
+ * cheaper than discovering it does not. These two are the knobs that bound the
+ * reply size: a larger page request just comes back bigger, and the transport
+ * treats anything that overflows the RX buffer as a fatal "Reply too large".
  */
 #pragma once
 
 #include "mtp_client.h"
 #include "mtp_model.h"
 
-/* One screen and a bit, in each case. */
-#define MTP_DIALOG_PAGE  10
-#define MTP_HISTORY_PAGE 8
+/* One screen and a bit, in each case. Page sizes are tight on purpose — each
+   dialog drags its full user/chat record (about 700 bytes compressed at a
+   recent measurement), so the request must stay small enough that the reply fits
+   both the RX frame buffer and the inflate arena. See the note above. */
+#define MTP_DIALOG_PAGE  4
+#define MTP_HISTORY_PAGE 4
 
 /*
  * Refresh the dialog list from scratch. Parses the users and chats vectors first

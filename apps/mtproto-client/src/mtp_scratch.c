@@ -4,6 +4,8 @@
 
 #include "mtp_mem.h"
 
+#pragma GCC visibility push(hidden)
+
 /* Lives on the heap, not in the app pool — see mtp_mem.h. mtp_mem_take returns
    8-byte-aligned memory, so callers can still place structs containing uint64_t
    here. */
@@ -50,3 +52,5 @@ void mtp_scratch_release(void *ptr)
 
 void *mtp_scratch_base(void) { return s_arena; }
 bool  mtp_scratch_is_lent(void) { return s_lent; }
+
+#pragma GCC visibility pop

@@ -9,6 +9,8 @@
 #include "mtp_schema.h"
 #include "mtp_tl.h"
 
+#pragma GCC visibility push(hidden)
+
 static char s_phone[24];
 static char s_code_hash[64];
 static char s_hint[32];
@@ -159,9 +161,13 @@ mtp_login_result_t mtp_login_send_code(const char *phone, mtp_code_info_t *out)
     size_t res_len;
     mtp_err_t err = mtp_client_invoke(buf, w.len, &res, &res_len);
     if (err == MTP_ERR_RPC) {
+        mtp_log("send_code_rpc_error");
         return classify();
     }
     if (err != MTP_OK) {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "send_code_fail_%d", (int)err);
+        mtp_log(ev);
         snprintf(s_error, sizeof(s_error), "%s", mtp_err_str(err));
         return MTP_LOGIN_ERROR;
     }
@@ -281,6 +287,9 @@ mtp_login_result_t mtp_login_sign_in(const char *code)
         return r;
     }
     if (err != MTP_OK) {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "sign_in_fail_%d", (int)err);
+        mtp_log(ev);
         snprintf(s_error, sizeof(s_error), "%s", mtp_err_str(err));
         return MTP_LOGIN_ERROR;
     }
@@ -417,6 +426,9 @@ mtp_login_result_t mtp_login_check_password(const char *password,
         return classify();
     }
     if (err != MTP_OK) {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "check_password_fail_%d", (int)err);
+        mtp_log(ev);
         snprintf(s_error, sizeof(s_error), "%s", mtp_err_str(err));
         return MTP_LOGIN_ERROR;
     }
@@ -443,3 +455,5 @@ mtp_err_t mtp_login_log_out(void)
     mtp_login_reset();
     return MTP_OK;
 }
+
+#pragma GCC visibility pop

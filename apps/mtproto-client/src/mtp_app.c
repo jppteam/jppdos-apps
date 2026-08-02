@@ -21,6 +21,8 @@
 #include "ui_screens.h"
 #include "ui_widgets.h"
 
+#pragma GCC visibility push(hidden)
+
 /* Frame period. The firmware repaints the panel every 100 ms, so drawing faster
    than that would only burn cycles the connection wants. */
 #define FRAME_MS 60u
@@ -43,7 +45,13 @@ void scr_connecting_draw(void);
 
 jpp_sdk_context_t *mtp_app_ctx(void)      { return s_ctx; }
 mtp_screen_t       mtp_app_screen(void)   { return s_screen; }
-void               mtp_app_goto(mtp_screen_t s) { s_screen = s; }
+void mtp_app_goto(mtp_screen_t s)
+{
+    s_screen = s;
+    char ev[32];
+    snprintf(ev, sizeof(ev), "screen_%d", (int)s);
+    mtp_log(ev);
+}
 int                mtp_app_open_chat(void) { return s_open_chat; }
 void               mtp_app_set_open_chat(int peer) { s_open_chat = peer; }
 
@@ -69,12 +77,8 @@ static void draw(void)
     case SCR_WELCOME:    scr_welcome_draw();    break;
     case SCR_MODE_PICK:  scr_mode_draw();       break;
     case SCR_CONNECTING: scr_connecting_draw(); break;
-    case SCR_PHONE:      scr_phone_draw();      break;
-    case SCR_CODE:       scr_code_draw();       break;
-    case SCR_PASSWORD:   scr_password_draw();   break;
     case SCR_DIALOGS:    scr_dialogs_draw();    break;
     case SCR_CHAT:       scr_chat_draw();       break;
-    case SCR_COMPOSE:    scr_compose_draw();    break;
     case SCR_SETTINGS:   scr_settings_draw();   break;
     case SCR_ERROR:      draw_error();          break;
     default:             ui_gfx_clear();        break;
@@ -106,12 +110,8 @@ static void handle_key(jpp_sdk_key_event_t ev)
         scr_welcome_key(ev);
         return;
     case SCR_MODE_PICK:  scr_mode_key(ev);     return;
-    case SCR_PHONE:      scr_phone_key(ev);    return;
-    case SCR_CODE:       scr_code_key(ev);     return;
-    case SCR_PASSWORD:   scr_password_key(ev); return;
     case SCR_DIALOGS:    scr_dialogs_key(ev);  return;
     case SCR_CHAT:       scr_chat_key(ev);     return;
-    case SCR_COMPOSE:    scr_compose_key(ev);  return;
     case SCR_SETTINGS:   scr_settings_key(ev); return;
 
     case SCR_ERROR:
@@ -150,6 +150,11 @@ static void notify(int peer)
 {
     if (peer == s_open_chat && s_screen == SCR_CHAT) {
         return;
+    }
+    {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "notify_peer_%d", peer);
+        mtp_log(ev);
     }
     (void)jpp_sdk_buzzer_play(s_ctx, JPP_BUZZER_SOUND_NOTIFY);
     (void)jpp_sdk_led_set_color(s_ctx, 0u, 40u, 90u);
@@ -252,8 +257,11 @@ void mtp_app_run(jpp_sdk_context_t *ctx)
 
     (void)mtp_time_init(ctx);
     if (mtp_config_init(ctx) != MTP_OK) {
+        mtp_log("config_init_fail");
         mtp_app_set_error("Startup failed", "Could not prepare server profiles");
         s_screen = SCR_ERROR;
+    } else {
+        mtp_log("config_ready");
     }
     mtp_client_init(ctx);
     mtp_model_reset();
@@ -326,3 +334,5 @@ void mtp_app_run(jpp_sdk_context_t *ctx)
     mem_teardown();
     jpp_sdk_request_close(ctx);
 }
+
+#pragma GCC visibility pop

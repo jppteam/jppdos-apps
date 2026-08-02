@@ -13,6 +13,8 @@
 #include "mtp_session.h"
 #include "ui_gfx.h"
 
+#pragma GCC visibility push(hidden)
+
 /*
  * The block's size, itemised. Every term is a compile-time constant from the
  * header that owns the buffer, so this cannot drift out of step with the
@@ -62,3 +64,5 @@ void *mtp_mem_take(size_t bytes)
 }
 
 size_t mtp_mem_bytes(void) { return MTP_MEM_BYTES; }
+
+#pragma GCC visibility pop

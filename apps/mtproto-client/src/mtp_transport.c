@@ -1,6 +1,9 @@
 #include "mtp_transport.h"
 
+#include <stdio.h>
 #include <string.h>
+
+#pragma GCC visibility push(hidden)
 
 /* Selects the intermediate transport; sent once, immediately after connect. */
 static const uint8_t TP_MAGIC[4] = { 0xEE, 0xEE, 0xEE, 0xEE };
@@ -52,6 +55,7 @@ mtp_err_t mtp_tp_connect(jpp_sdk_context_t *ctx, const char *host, uint16_t port
         mtp_tp_close(ctx);
         return MTP_ERR_NET;
     }
+    mtp_log("tp_connected");
     return MTP_OK;
 }
 
@@ -60,6 +64,7 @@ void mtp_tp_close(jpp_sdk_context_t *ctx)
     if (s_sock < 0) {
         return;
     }
+    mtp_log("tp_closed");
     jpp_broker_result_t result;
     memset(&result, 0, sizeof(result));
     (void)jpp_sdk_net_close(ctx, s_sock, &result);
@@ -148,6 +153,9 @@ mtp_err_t mtp_tp_recv(jpp_sdk_context_t *ctx, uint8_t *buf, size_t cap,
         return MTP_ERR_PROTO;
     }
     if (len > cap) {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "tp_recv_overflow_%lu", (unsigned long)len);
+        mtp_log(ev);
         mtp_tp_close(ctx);
         return MTP_ERR_OVERFLOW;
     }
@@ -176,3 +184,5 @@ bool mtp_tp_frame_is_error(const uint8_t *buf, size_t len, int32_t *out_code)
     }
     return true;
 }
+
+#pragma GCC visibility pop

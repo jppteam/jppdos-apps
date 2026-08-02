@@ -1,5 +1,6 @@
 #include "mtp_auth.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "jpp_crypto_core.h"
@@ -7,6 +8,8 @@
 #include "mtp_scratch.h"
 #include "mtp_session.h"
 #include "mtp_tl.h"
+
+#pragma GCC visibility push(hidden)
 
 /* ---- Constructor ids ----------------------------------------------------- */
 
@@ -761,5 +764,12 @@ mtp_err_t mtp_auth_handshake(jpp_sdk_context_t *ctx,
        the derived key; the caller has its own copy of what it needs. */
     mtp_scratch_release(sp);
     sp = NULL;
+    if (err != MTP_OK) {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "handshake_fail_%d", (int)err);
+        mtp_log(ev);
+    }
     return err;
 }
+
+#pragma GCC visibility pop

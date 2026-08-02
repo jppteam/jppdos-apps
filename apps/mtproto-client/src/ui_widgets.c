@@ -11,6 +11,8 @@
 #include "ui_gfx.h"
 #include "ui_icons.h"
 
+#pragma GCC visibility push(hidden)
+
 #define TOAST_MS 2500u
 
 static char     s_toast[40];
@@ -265,3 +267,5 @@ void ui_toast_draw(void)
     ui_gfx_rfill(0, y, UI_W, h, true);
     (void)ui_gfx_text_center(0, y + 2, UI_W, s_toast, false);
 }
+
+#pragma GCC visibility pop

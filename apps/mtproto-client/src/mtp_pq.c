@@ -1,5 +1,7 @@
 #include "mtp_pq.h"
 
+#pragma GCC visibility push(hidden)
+
 uint64_t mtp_pq_mulmod(uint64_t a, uint64_t b, uint64_t m)
 {
     /*
@@ -122,3 +124,5 @@ bool mtp_pq_factor(uint64_t n, uint32_t *out_p, uint32_t *out_q)
     *out_q = (uint32_t)hi;
     return true;
 }
+
+#pragma GCC visibility pop

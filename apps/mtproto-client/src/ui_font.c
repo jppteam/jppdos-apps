@@ -1,5 +1,7 @@
 #include "ui_font.h"
 
+#pragma GCC visibility push(hidden)
+
 uint32_t ui_utf8_next(const char *s, size_t *pos)
 {
     const uint8_t *p = (const uint8_t *)s + *pos;
@@ -109,3 +111,5 @@ size_t ui_font_fit(const char *s, int max_px)
         pos = next;
     }
 }
+
+#pragma GCC visibility pop

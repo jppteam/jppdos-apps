@@ -16,9 +16,9 @@
 #include "mtp_skip.h"
 #include "mtp_tl.h"
 
-#define MTP_MAX_PEERS    24
-#define MTP_MAX_DIALOGS  12
-#define MTP_MAX_MESSAGES 16
+#define MTP_MAX_PEERS    16
+#define MTP_MAX_DIALOGS  8
+#define MTP_MAX_MESSAGES 10
 
 /* Display name length. 21 characters fill the screen at the 5x7 font, so 40
    bytes covers that even when every character is two-byte Cyrillic. */
@@ -40,9 +40,8 @@ typedef enum {
  * largest claim on the pool after the transfer buffers, so an eight-byte hole
  * per peer is a couple of hundred bytes of a 64 KB budget.
  *
- * A peer index is int16_t because MTP_MAX_PEERS is 24 and -1 has to be
- * representable; it is not a char, so widening the table does not silently
- * truncate.
+ * A peer index is int16_t because -1 has to be representable; it is not a
+ * char, so widening the table does not silently truncate.
  */
 typedef struct {
     int64_t id;

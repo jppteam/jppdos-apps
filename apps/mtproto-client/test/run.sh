@@ -81,7 +81,7 @@ cc "${CFLAGS[@]}" \
    "$APP_DIR/src/mtp_pq.c" "$APP_DIR/src/mtp_config.c" \
    "$APP_DIR/src/mtp_gzip.c" \
    "$APP_DIR/src/ui_font.c" "$APP_DIR/src/ui_font_data.c" "$APP_DIR/src/ui_gfx.c" \
-   "$APP_DIR/src/ui_keyboard.c" "$APP_DIR/src/ui_icons_data.c" \
+   "$APP_DIR/src/ui_icons_data.c" \
    "$APP_DIR/src/mtp_skip.c" "$APP_DIR/src/mtp_skip_data.c" \
    "$APP_DIR/src/mtp_srp.c" "$APP_DIR/src/mtp_scratch.c" \
    "$APP_DIR/src/mtp_mem.c" -lz \

@@ -1,5 +1,7 @@
 #include "mtp_skip.h"
 
+#pragma GCC visibility push(hidden)
+
 /* Kind codes. Mirrors the K table in test/gen_skip.py — change both together. */
 enum {
     K_FLAGS0 = 0, K_FLAGS1, K_INT, K_LONG, K_INT128, K_INT256, K_DOUBLE,
@@ -200,3 +202,5 @@ mtp_skip_result_t mtp_skip_rest(mtp_r_t *r, unsigned type_index, uint32_t ctor_i
     }
     return run_fields(r, c, consumed, flags, flags2, 0, NULL);
 }
+
+#pragma GCC visibility pop

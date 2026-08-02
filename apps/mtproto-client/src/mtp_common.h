@@ -25,7 +25,10 @@
  *           further 12..27 (mtp_w_pad_random rounds to a 16-byte boundary, so it
  *           never approaches the spec's 1024-byte ceiling).
  *   RX      Holds one encrypted frame as it arrives. Responses of any size worth
- *           having are gzipped, so this bounds the *compressed* form.
+ *           having are gzipped, so this bounds the *compressed* form. Sized at
+ *           4 KB rather than the 3 KB this was trimmed to: a messages.getDialogs
+ *           reply for even a modest account can compress to more than 3 KB, and
+ *           the transport treats an oversized frame as fatal ("Reply too large").
  *   INFLATE Holds a gzip_packed body once expanded, which is what the TL parser
  *           actually reads. Necessarily the largest of the three, and it doubles
  *           as the DEFLATE window (see mtp_gzip.c).
@@ -37,7 +40,7 @@
  * figure that would do. It is what limits the page sizes the client asks for.
  */
 #define MTP_TX_MAX      768u
-#define MTP_RX_MAX      3072u
+#define MTP_RX_MAX      4096u
 #define MTP_INFLATE_MAX 6656u   /* == MTP_SCRATCH_BYTES; see mtp_scratch.h */
 
 /* 2048-bit operands: RSA modulus, DH prime, g_a/g_b, SRP. */
@@ -144,3 +147,14 @@ size_t mtp_hex_decode(const char *hex, uint8_t *out, size_t out_cap);
 bool mtp_parse_u32(const char *s, uint32_t *out);
 
 extern void randombytes_buf(void *buf, size_t size);
+
+/*
+ * Serial logging (device console, tag `app_log`). Emits a named event through
+ * the App SDK; a no-op until the app is running with an SDK context installed.
+ * jpp_sdk_log takes a single event string and no formatting, so callers that
+ * want to carry a value snprintf it into a small buffer and pass that.
+ *
+ * Declared here rather than in a module header so every layer can log without
+ * chasing includes. Implemented by the network client (mtp_client.c).
+ */
+void mtp_log(const char *event_name);

@@ -1,11 +1,14 @@
 #include "mtp_session.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "jpp_crypto_core.h"
 #include "mtp_mem.h"
 #include "mtp_time.h"
 #include "mtp_tl.h"
+
+#pragma GCC visibility push(hidden)
 
 /*
  * Buffer layout. The frame is what goes on the wire; the 32-byte lead-in in
@@ -87,6 +90,7 @@ mtp_err_t mtp_sess_set_auth_key(const uint8_t key[MTP_AUTH_KEY_BYTES])
     s_auth_key_id = mtp_rd_u64le(digest + 12);
     s_have_key = true;
     s_key_rejected = false;
+    mtp_log("auth_key_set");
     return MTP_OK;
 }
 
@@ -325,16 +329,24 @@ mtp_err_t mtp_sess_recv(jpp_sdk_context_t *ctx, mtp_msg_t *out, uint32_t timeout
     int32_t tp_code;
     if (mtp_tp_frame_is_error(frame, got, &tp_code)) {
         if (tp_code == MTP_TP_ERR_AUTH_KEY_UNKNOWN) {
+            mtp_log("recv_auth_key_unknown");
             s_key_rejected = true;
             return MTP_ERR_AUTH_KEY;
+        }
+        {
+            char ev[40];
+            snprintf(ev, sizeof(ev), "recv_tp_error_%d", (int)tp_code);
+            mtp_log(ev);
         }
         return MTP_ERR_PROTO;
     }
     /* 24-byte header plus at least one 16-byte cipher block. */
     if (got < 24u + 16u || ((got - 24u) & 15u) != 0u) {
+        mtp_log("recv_frame_malformed");
         return MTP_ERR_PROTO;
     }
     if (mtp_rd_u64le(frame) != s_auth_key_id) {
+        mtp_log("recv_auth_key_mismatch");
         return MTP_ERR_PROTO;
     }
 
@@ -393,3 +405,5 @@ mtp_err_t mtp_sess_recv(jpp_sdk_context_t *ctx, mtp_msg_t *out, uint32_t timeout
 }
 
 bool mtp_sess_auth_key_rejected(void) { return s_key_rejected; }
+
+#pragma GCC visibility pop

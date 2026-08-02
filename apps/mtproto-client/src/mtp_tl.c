@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#pragma GCC visibility push(hidden)
+
 /* TL booleans are constructors, not a bit. */
 #define TL_BOOL_TRUE  0x997275b5u
 #define TL_BOOL_FALSE 0xbc799737u
@@ -294,3 +296,5 @@ uint32_t mtp_r_peek_u32(const mtp_r_t *r)
     }
     return mtp_rd_u32le(r->buf + r->pos);
 }
+
+#pragma GCC visibility pop

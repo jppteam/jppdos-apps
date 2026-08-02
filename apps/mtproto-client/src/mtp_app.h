@@ -20,12 +20,8 @@ typedef enum {
     SCR_WELCOME = 0,
     SCR_MODE_PICK,
     SCR_CONNECTING,
-    SCR_PHONE,
-    SCR_CODE,
-    SCR_PASSWORD,
     SCR_DIALOGS,
     SCR_CHAT,
-    SCR_COMPOSE,
     SCR_SETTINGS,
     SCR_ERROR,
 } mtp_screen_t;

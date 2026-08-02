@@ -6,6 +6,8 @@
 #include "mtp_mem.h"
 #include "mtp_schema.h"
 
+#pragma GCC visibility push(hidden)
+
 /* The three tables live on the heap, not in the app pool — see mtp_mem.h. */
 static mtp_peer_t   *s_peers;
 static int           s_peer_count;
@@ -568,3 +570,5 @@ void mtp_parse_chat_vector(mtp_r_t *r)
         }
     }
 }
+
+#pragma GCC visibility pop

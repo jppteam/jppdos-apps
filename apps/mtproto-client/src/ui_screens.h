@@ -19,18 +19,10 @@ void scr_mode_enter(void);
 void scr_mode_draw(void);
 void scr_mode_key(jpp_sdk_key_event_t ev);
 
-/* Login: phone, code, two-factor password. */
-void scr_phone_enter(void);
-void scr_phone_draw(void);
-void scr_phone_key(jpp_sdk_key_event_t ev);
-
-void scr_code_enter(const mtp_code_info_t *info);
-void scr_code_draw(void);
-void scr_code_key(jpp_sdk_key_event_t ev);
-
-void scr_password_enter(void);
-void scr_password_draw(void);
-void scr_password_key(jpp_sdk_key_event_t ev);
+/* Login: phone, code, two-factor password — one blocking flow built on the App
+   SDK's jpp_sdk_input(), rather than a screen per step. Call it and it returns
+   only once the user reaches SCR_DIALOGS, SCR_MODE_PICK, or SCR_ERROR. */
+void scr_login_run(void);
 
 /* Chat list and conversation. */
 void scr_dialogs_enter(void);
@@ -43,10 +35,6 @@ void scr_chat_draw(void);
 void scr_chat_key(jpp_sdk_key_event_t ev);
 /* Called when an update lands, so an open chat scrolls to a new message. */
 void scr_chat_on_new_message(int peer_index);
-
-void scr_compose_enter(void);
-void scr_compose_draw(void);
-void scr_compose_key(jpp_sdk_key_event_t ev);
 
 void scr_settings_enter(void);
 void scr_settings_draw(void);

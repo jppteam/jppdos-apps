@@ -61,7 +61,7 @@ typedef struct {
 
 /*
  * Compute every key fingerprint and load the Custom profile from
- * /sd/apps/mtproto-client/custom.conf if it is present. A missing or malformed
+ * /sd/apps/mtproto_client/custom.conf if it is present. A missing or malformed
  * custom.conf is not an error here — it only makes MTP_MODE_CUSTOM unusable,
  * which mtp_config_check reports when that mode is actually selected.
  */

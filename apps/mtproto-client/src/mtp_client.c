@@ -1,5 +1,6 @@
 #include "mtp_client.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -10,6 +11,8 @@
 #include "mtp_time.h"
 #include "mtp_tl.h"
 #include "mtp_transport.h"
+
+#pragma GCC visibility push(hidden)
 
 #define CALL_TIMEOUT_MS 20000u
 
@@ -69,6 +72,15 @@ void mtp_client_init(jpp_sdk_context_t *ctx)
     mtp_rpc_reset();
 }
 
+/* Serial logging through the App SDK; a no-op until the client is initialised
+   with a context, so every module can call it unconditionally. */
+void mtp_log(const char *event_name)
+{
+    if (s_ctx != NULL && event_name != NULL) {
+        (void)jpp_sdk_log(s_ctx, event_name);
+    }
+}
+
 mtp_conn_state_t mtp_client_state(void)      { return s_state; }
 mtp_mode_t       mtp_client_mode(void)       { return s_mode; }
 bool             mtp_client_is_logged_in(void) { return s_session.logged_in; }
@@ -126,6 +138,11 @@ static mtp_err_t connect_dc(const mtp_profile_t *profile, int dc_id,
     if (err != MTP_OK) {
         return err;
     }
+    {
+        char ev[40];
+        snprintf(ev, sizeof(ev), "dc_tcp_open_%d", dc->id);
+        mtp_log(ev);
+    }
 
     /* A stored key belongs to the DC it was negotiated with; using it elsewhere
        earns transport error -404. */
@@ -133,12 +150,14 @@ static mtp_err_t connect_dc(const mtp_profile_t *profile, int dc_id,
                  mtp_sess_set_auth_key(s_session.auth_key) == MTP_OK;
 
     if (!reuse) {
+        mtp_log("handshake_start");
         mtp_auth_result_t result;
         err = mtp_auth_handshake(s_ctx, profile, dc->id, progress, user, &result);
         if (err != MTP_OK) {
             mtp_tp_close(s_ctx);
             return err;
         }
+        mtp_log("handshake_done");
         err = mtp_sess_set_auth_key(result.auth_key);
         if (err != MTP_OK) {
             mtp_tp_close(s_ctx);
@@ -184,6 +203,9 @@ mtp_err_t mtp_client_connect(mtp_mode_t mode,
     int dc = s_session.dc_id != 0 ? s_session.dc_id : profile->default_dc;
     err = connect_dc(profile, dc, progress, user);
     if (err != MTP_OK) {
+        char ev[40];
+        snprintf(ev, sizeof(ev), "client_connect_fail_%d", (int)err);
+        mtp_log(ev);
         s_state = MTP_CONN_OFFLINE;
         return err;
     }
@@ -191,11 +213,13 @@ mtp_err_t mtp_client_connect(mtp_mode_t mode,
     s_state = MTP_CONN_READY;
     mtp_store_set_last_mode(mode);
     (void)mtp_client_save();
+    mtp_log("client_ready");
     return MTP_OK;
 }
 
 void mtp_client_disconnect(void)
 {
+    mtp_log("client_disconnect");
     if (s_ctx != NULL) {
         (void)mtp_rpc_flush_acks(s_ctx);
         mtp_tp_close(s_ctx);
@@ -232,6 +256,11 @@ static mtp_err_t migrate(int target_dc)
         return MTP_ERR_MIGRATE;
     }
     s_migrating = true;
+    {
+        char ev[40];
+        snprintf(ev, sizeof(ev), "migrate_to_%d", target_dc);
+        mtp_log(ev);
+    }
 
     uint8_t  export_bytes[256];
     size_t   export_len = 0u;
@@ -362,13 +391,45 @@ static mtp_err_t wrap_request(const uint8_t *body, size_t len,
     return MTP_OK;
 }
 
+/*
+ * Rebuild the TCP connection and session from the stored key. Used to recover
+ * from a transport failure (an oversized frame, a dropped link) without losing
+ * the login state, so a single bad frame does not take the whole session down
+ * with it. connect_dc re-establishes the auth_key and a fresh session; the
+ * stored key makes that a cheap fast-path when it is still valid.
+ */
+static mtp_err_t reconnect_session(void)
+{
+    const mtp_profile_t *profile = mtp_config_profile(s_mode);
+    if (profile == NULL) {
+        return MTP_ERR_ARG;
+    }
+    int dc = s_session.dc_id != 0 ? s_session.dc_id : profile->default_dc;
+    mtp_err_t err = connect_dc(profile, dc, NULL, NULL);
+    if (err == MTP_OK) {
+        s_state = MTP_CONN_READY;
+        mtp_log("client_reconnected");
+    } else {
+        s_state = MTP_CONN_OFFLINE;
+    }
+    return err;
+}
+
 mtp_err_t mtp_client_invoke(const uint8_t *body, size_t len,
                             const uint8_t **out_result, size_t *out_len)
 {
     *out_result = NULL;
     *out_len = 0u;
+
+    /* The connection may have died since the last call (an oversized frame, a
+       long sleep). Rebuild it rather than failing every caller with a bare NET
+       error — the whole point of the two-attempt loop below is that callers
+       should not need their own reconnect-and-retry. */
     if (s_state != MTP_CONN_READY || !mtp_tp_is_open()) {
-        return MTP_ERR_NET;
+        mtp_err_t cerr = reconnect_session();
+        if (cerr != MTP_OK) {
+            return cerr;
+        }
     }
 
     /*
@@ -421,21 +482,33 @@ mtp_err_t mtp_client_invoke(const uint8_t *body, size_t len,
             s_state = MTP_CONN_OFFLINE;
             return MTP_ERR_AUTH_KEY;
         }
-        if (err == MTP_ERR_RPC || err == MTP_ERR_OVERFLOW || err == MTP_ERR_PROTO) {
-            /* The server answered; retrying would get the same answer. */
+        if (err == MTP_ERR_RPC) {
+            /* The server answered with an rpc_error; retrying would get the
+               same answer. */
+            char ev[40];
+            snprintf(ev, sizeof(ev), "invoke_fail_%d", (int)err);
+            mtp_log(ev);
             return err;
         }
         if (attempt > 0) {
             return err;
         }
 
-        /* Transport-level failure — rebuild the connection and try once more. */
-        const mtp_profile_t *profile = mtp_config_profile(s_mode);
-        if (profile == NULL || connect_dc(profile, s_session.dc_id, NULL, NULL) != MTP_OK) {
+        /*
+         * Everything left is a transport-level failure — a dropped link, an
+         * auth_key the server forgot, a reply frame larger than the RX buffer
+         * (which closes the socket). A rich account can push a large update
+         * batch that does not fit, so these are worth one reconnection and
+         * retry rather than being treated as a terminal error: the backlog
+         * drains, the next response is smaller, and the call goes through.
+         */
+        mtp_log("invoke_reconnect");
+        if (reconnect_session() != MTP_OK) {
             s_state = MTP_CONN_OFFLINE;
             return err;
         }
     }
+    mtp_log("invoke_not_served");
     return MTP_ERR_NET;
 }
 
@@ -450,11 +523,24 @@ void mtp_client_pump(void)
     /* Poll, don't block: the caller is also reading the keypad. */
     mtp_err_t err = mtp_rpc_poll(s_ctx, 0u);
     if (err != MTP_OK && err != MTP_ERR_TIMEOUT) {
+        char ev[40];
+        snprintf(ev, sizeof(ev), "pump_error_%d", (int)err);
+        mtp_log(ev);
         if (err == MTP_ERR_AUTH_KEY && mtp_sess_auth_key_rejected()) {
+            mtp_log("auth_key_rejected");
             mtp_client_forget();
+            s_state = MTP_CONN_OFFLINE;
+            return;
         }
+        /*
+         * A transport failure — an oversized update frame closes the socket, a
+         * WiFi drop does the same. Reconnect in place rather than dropping to
+         * OFFLINE, so the session keeps running what the user sees; the next
+         * RPC (or this one, via its retry) continues over the fresh link. An
+         * update batch we could not hold is not worth interrupting the app for.
+         */
         mtp_tp_close(s_ctx);
-        s_state = MTP_CONN_OFFLINE;
+        (void)reconnect_session();
         return;
     }
 
@@ -463,7 +549,9 @@ void mtp_client_pump(void)
         s_last_ping_ms = now;
         if (mtp_rpc_ping(s_ctx, PING_DISCONNECT_S) != MTP_OK) {
             mtp_tp_close(s_ctx);
-            s_state = MTP_CONN_OFFLINE;
+            (void)reconnect_session();
         }
     }
 }
+
+#pragma GCC visibility pop

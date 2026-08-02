@@ -9,6 +9,8 @@
 #include "mtp_skip.h"
 #include "mtp_tl.h"
 
+#pragma GCC visibility push(hidden)
+
 static bool s_dirty;
 static int  s_last_peer = -1;
 
@@ -200,6 +202,11 @@ static void on_update(void *user, const uint8_t *body, size_t len)
     mtp_r_t r;
     mtp_r_init(&r, body, len);
     uint32_t id = mtp_r_peek_u32(&r);
+    {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "upd_0x%x", (unsigned)id);
+        mtp_log(ev);
+    }
 
     switch (id) {
     case MTP_ID_UPDATESHORTMESSAGE:
@@ -261,3 +268,5 @@ void mtp_updates_install(void)
     s_last_peer = -1;
     mtp_rpc_set_update_handler(on_update, NULL);
 }
+
+#pragma GCC visibility pop

@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#pragma GCC visibility push(hidden)
+
 /*
  * On-disk format. The magic and version exist so that a future layout change is
  * detected and the session simply discarded, rather than a stale file being read
@@ -11,7 +13,7 @@
 #define STORE_MAGIC   0x4A50544Du   /* "JPTM" */
 #define STORE_VERSION 1u
 
-#define STORE_DIR "/sd/apps/mtproto-client"
+#define STORE_DIR "/sd/apps/mtproto_client"
 
 /* The last-used mode is small and non-critical, so it lives in the KV store
    rather than a file of its own. */
@@ -173,3 +175,5 @@ void mtp_store_set_last_mode(mtp_mode_t mode)
     (void)fwrite(&byte, 1u, 1u, f);
     fclose(f);
 }
+
+#pragma GCC visibility pop

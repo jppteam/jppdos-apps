@@ -8,6 +8,8 @@
 #include "mtp_time.h"
 #include "mtp_tl.h"
 
+#pragma GCC visibility push(hidden)
+
 _Static_assert(MTP_INFLATE_MAX == MTP_SCRATCH_BYTES,
                "the inflate buffer is the scratch arena; keep the bounds equal");
 
@@ -190,6 +192,14 @@ static void handle_rpc_error(mtp_r_t *r)
     mtp_r_str(r, s_error_text, sizeof(s_error_text));
     s_migrate_dc = -1;
     s_flood_wait = -1;
+
+    {
+        /* Cap the text at 30 chars so the line cannot grow past the buffer;
+           for a FLOOD_WAIT/PHONE_MIGRATE suffix that is more than enough. */
+        char ev[64];
+        snprintf(ev, sizeof(ev), "rpc_error_%d_%.30s", s_error_code, s_error_text);
+        mtp_log(ev);
+    }
 
     /*
      * The MIGRATE family is a redirect, not a failure: the account lives on
@@ -400,6 +410,11 @@ static void dispatch(jpp_sdk_context_t *ctx, uint64_t msg_id, uint32_t seq_no,
          * Anything else is an update (or a container element we do not model).
          * Updates are content-related, so they do need acknowledging.
          */
+        {
+            char ev[48];
+            snprintf(ev, sizeof(ev), "update_c_0x%x", (unsigned)id);
+            mtp_log(ev);
+        }
         ack_queue(msg_id);
         if (s_update_fn != NULL) {
             s_update_fn(s_update_user, body, len);
@@ -508,13 +523,20 @@ mtp_err_t mtp_rpc_call(jpp_sdk_context_t *ctx,
             }
             *out_result = s_result;
             *out_len = s_result_len;
+            {
+                char ev[48];
+                snprintf(ev, sizeof(ev), "rpc_result_len_%u", (unsigned)*out_len);
+                mtp_log(ev);
+            }
             return MTP_OK;
         }
         if (!s_needs_resend) {
             s_pending_msg_id = 0u;
+            mtp_log("rpc_timeout");
             return MTP_ERR_TIMEOUT;
         }
         /* Loop and resend under the corrected salt / clock / session. */
+        mtp_log("rpc_resend");
     }
 
     s_pending_msg_id = 0u;
@@ -538,3 +560,5 @@ mtp_err_t mtp_rpc_ping(jpp_sdk_context_t *ctx, uint32_t disconnect_delay_s)
     /* Pings are not content-related. */
     return mtp_sess_send(ctx, body, w.len, false, NULL);
 }
+
+#pragma GCC visibility pop

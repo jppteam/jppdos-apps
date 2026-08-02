@@ -11,6 +11,8 @@
  */
 #include "mtp_skip.h"
 
+#pragma GCC visibility push(hidden)
+
 /* 703 fields, 152 constructors, 46 types */
 const mtp_skip_field_t mtp_skip_fields[] = {
     { 0,0xFF,  0}, { 9,0x05,  0}, { 9,0x08,  0}, { 9,0x0A,  0}, { 3,0xFF,  0},
@@ -361,3 +363,5 @@ const mtp_skip_type_t mtp_skip_types[] = {
 };
 
 const size_t mtp_skip_type_count = sizeof(mtp_skip_types) / sizeof(mtp_skip_types[0]);
+
+#pragma GCC visibility pop

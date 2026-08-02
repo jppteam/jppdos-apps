@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#pragma GCC visibility push(hidden)
+
 /* DEFLATE's alphabets: 288 literal/length symbols, 30 distance symbols, and 19
    code-length symbols for the dynamic-header encoding. */
 #define SYM_MAX 288
@@ -364,3 +366,5 @@ mtp_err_t mtp_gzip_inflate(const uint8_t *in, size_t in_len,
     *out_len = d.out_pos;
     return MTP_OK;
 }
+
+#pragma GCC visibility pop

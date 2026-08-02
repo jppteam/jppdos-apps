@@ -5,6 +5,8 @@
 #include "mtp_mem.h"
 #include "ui_font.h"
 
+#pragma GCC visibility push(hidden)
+
 #define ROW_BYTES (UI_W / 8)
 
 _Static_assert(UI_FB_BYTES == UI_H * ROW_BYTES, "framebuffer size mismatch");
@@ -376,3 +378,5 @@ jpp_sdk_status_t ui_gfx_flush(jpp_sdk_context_t *ctx)
     }
     return JPP_SDK_STATUS_OK;
 }
+
+#pragma GCC visibility pop

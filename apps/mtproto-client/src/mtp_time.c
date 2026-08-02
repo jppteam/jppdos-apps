@@ -5,6 +5,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#pragma GCC visibility push(hidden)
+
 /* Unixtime of the RTC seed, and the tick count when it was taken. Elapsed time
    since the seed comes from the tick, which is what gives sub-second msg_ids. */
 static uint32_t s_seed_unix;
@@ -200,3 +202,5 @@ int32_t mtp_time_day_index(uint32_t unixtime)
 {
     return (int32_t)(unixtime / 86400u);
 }
+
+#pragma GCC visibility pop

@@ -7,6 +7,8 @@
 #include "mtp_scratch.h"
 #include "mtp_tl.h"
 
+#pragma GCC visibility push(hidden)
+
 /* ========================================================================== *
  *                        VALUES TO FILL IN BEFORE RELEASE                    *
  * ========================================================================== *
@@ -56,7 +58,7 @@
 
 /* Where the Custom profile reads its settings from. Scoped storage, so it is
    reachable over the device's WebDAV server without files.full. */
-#define CUSTOM_CONF_PATH "/sd/apps/mtproto-client/custom.conf"
+#define CUSTOM_CONF_PATH "/sd/apps/mtproto_client/custom.conf"
 
 /* Reported in initConnection and shown in the user's active-session list. */
 #define DEV_MODEL   "J++Device"
@@ -488,3 +490,5 @@ const mtp_rsa_key_t *mtp_config_match_key(const mtp_profile_t *profile,
 }
 
 const char *mtp_config_custom_error(void) { return s_cu_error; }
+
+#pragma GCC visibility pop

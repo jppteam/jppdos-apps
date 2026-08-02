@@ -15,6 +15,8 @@
  */
 #include "ui_font.h"
 
+#pragma GCC visibility push(hidden)
+
 const uint8_t ui_font_notdef[UI_FONT_BYTES] = { 0x3E, 0x22, 0x22, 0x22, 0x3E };
 
 const ui_glyph_t ui_font_glyphs[] = {
@@ -182,3 +184,5 @@ const ui_glyph_t ui_font_glyphs[] = {
 };
 
 const size_t ui_font_glyph_count = sizeof(ui_font_glyphs) / sizeof(ui_font_glyphs[0]);
+
+#pragma GCC visibility pop

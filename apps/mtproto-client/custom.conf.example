@@ -1,6 +1,6 @@
 # Custom server profile for the MTProto client.
 #
-# Copy to /sd/apps/mtproto-client/custom.conf — over the device's WebDAV server
+# Copy to /sd/apps/mtproto_client/custom.conf — over the device's WebDAV server
 # (Settings > WebDAV server), or by putting the SD card in a reader — and the
 # "Custom" entry in the server picker becomes selectable.
 #

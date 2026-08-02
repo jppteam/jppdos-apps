@@ -21,8 +21,9 @@
 #include "ui_font.h"
 #include "ui_gfx.h"
 #include "ui_icons.h"
-#include "ui_keyboard.h"
 #include "ui_widgets.h"
+
+#pragma GCC visibility push(hidden)
 
 #define DIALOG_ROW_H 14
 #define AVATAR_W     11
@@ -31,8 +32,8 @@ static ui_list_t s_dialogs;
 static int       s_chat_peer = -1;
 static int       s_chat_scroll;          /* messages skipped from the bottom */
 static bool      s_chat_loading;
-static ui_kbd_t  s_compose_kbd;
-static char      s_compose[224];
+
+static void compose_and_send(void);
 
 /* ---- Dialog list --------------------------------------------------------- */
 
@@ -40,6 +41,9 @@ void scr_dialogs_refresh(void)
 {
     mtp_err_t err = mtp_api_get_dialogs();
     if (err != MTP_OK) {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "dialogs_ui_error_%d", (int)err);
+        mtp_log(ev);
         ui_toast(mtp_err_str(err));
     }
     ui_list_set_count(&s_dialogs, mtp_dialogs_count());
@@ -350,8 +354,7 @@ void scr_chat_key(jpp_sdk_key_event_t ev)
         return;
 
     case JPP_SDK_KEY_CENTER:
-        scr_compose_enter();
-        mtp_app_goto(SCR_COMPOSE);
+        compose_and_send();
         return;
 
     case JPP_SDK_KEY_LEFT:
@@ -366,48 +369,38 @@ void scr_chat_key(jpp_sdk_key_event_t ev)
     }
 }
 
-/* ---- Composer ------------------------------------------------------------ */
-
-void scr_compose_enter(void)
+/*
+ * ---- Composer --------------------------------------------------------------
+ * A single blocking jpp_sdk_input() call rather than a driven screen. That
+ * means mtp_client_pump() does not run for as long as the user is typing —
+ * an accepted tradeoff (see ui_widgets.h for why every other screen here
+ * avoids blocking modals) in exchange for the App SDK's own keyboard instead
+ * of a hand-rolled one. It also caps a message at JPP_SDK_INPUT_VALUE_MAX (64)
+ * characters and ASCII only, down from the 224-byte UTF-8 buffer used before.
+ */
+static void compose_and_send(void)
 {
-    s_compose[0] = '\0';
-    ui_kbd_init(&s_compose_kbd, s_compose, sizeof(s_compose), "Message");
     /* Tell the peer we are typing, exactly as a phone would. Best effort: a
        failure here is not worth interrupting the user for. */
     (void)mtp_api_set_typing(s_chat_peer, true);
-}
 
-void scr_compose_draw(void)
-{
-    ui_kbd_draw(&s_compose_kbd);
-    ui_toast_draw();
-}
+    char text[JPP_SDK_INPUT_VALUE_MAX + 1] = { 0 };
+    jpp_sdk_ui_result_t res;
+    (void)jpp_sdk_input(mtp_app_ctx(), "Message", NULL, JPP_SDK_INPUT_TEXT,
+                        text, sizeof(text), &res);
 
-void scr_compose_key(jpp_sdk_key_event_t ev)
-{
-    switch (ui_kbd_key(&s_compose_kbd, ev)) {
-    case UI_KBD_CANCEL:
-        (void)mtp_api_set_typing(s_chat_peer, false);
-        mtp_app_goto(SCR_CHAT);
-        return;
-    case UI_KBD_COMMIT:
-        break;
-    default:
+    (void)mtp_api_set_typing(s_chat_peer, false);
+
+    if (res == JPP_SDK_UI_BACK || text[0] == '\0') {
         return;
     }
 
-    if (s_compose[0] == '\0') {
-        (void)mtp_api_set_typing(s_chat_peer, false);
-        mtp_app_goto(SCR_CHAT);
-        return;
-    }
-
-    mtp_err_t err = mtp_api_send_message(s_chat_peer, s_compose);
+    mtp_err_t err = mtp_api_send_message(s_chat_peer, text);
     if (err != MTP_OK) {
         ui_toast(mtp_err_str(err));
     } else {
         s_chat_scroll = 0;
     }
-    (void)mtp_api_set_typing(s_chat_peer, false);
-    mtp_app_goto(SCR_CHAT);
 }
+
+#pragma GCC visibility pop

@@ -10,7 +10,17 @@
 
 #include "mtp_app.h"
 
+#pragma GCC visibility push(hidden)
+
+/*
+ * The one symbol the loader resolves by name, so it is the one definition in
+ * this app that keeps default ELF visibility — everything else is hidden (see
+ * NOTES.md, "Pass three").
+ */
+__attribute__((visibility("default")))
 void jpp_app_entry(jpp_sdk_context_t *ctx)
 {
     mtp_app_run(ctx);
 }
+
+#pragma GCC visibility pop

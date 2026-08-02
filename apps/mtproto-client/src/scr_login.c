@@ -16,15 +16,15 @@
 #include "mtp_store.h"
 #include "ui_gfx.h"
 #include "ui_icons.h"
-#include "ui_keyboard.h"
 #include "ui_widgets.h"
 
-static ui_kbd_t   s_kbd;
+#pragma GCC visibility push(hidden)
+
+/* Remembered across a "back" from the code step, so a retry does not force the
+   user to retype the number. jpp_sdk_input() never prefills a field, so this
+   can only be shown back to them as a placeholder, not restored into the box. */
 static char       s_phone[24];
-static char       s_code[12];
-static char       s_password[64];
 static ui_list_t  s_mode_list;
-static mtp_code_info_t s_code_info;
 
 /* Progress state for the long operations, drawn by the render callback. */
 static char s_step[24];
@@ -172,8 +172,7 @@ static void connect_and_continue(mtp_mode_t mode)
         }
         /* The server no longer knows us — fall through to a fresh login. */
     }
-    scr_phone_enter();
-    mtp_app_goto(SCR_PHONE);
+    scr_login_run();
 }
 
 void scr_mode_key(jpp_sdk_key_event_t ev)
@@ -214,97 +213,27 @@ void scr_mode_key(jpp_sdk_key_event_t ev)
 
 /* ---- Connecting ---------------------------------------------------------- */
 
-/* Drawn by the app loop and by progress_cb; shared so both look identical. */
+/*
+ * Drawn by the app loop and by progress_cb; shared so both look identical.
+ *
+ * The long operation it reports on usually follows an jpp_sdk_input() modal —
+ * in the 2FA case, the password prompt right before the SRP derivation — and
+ * every modal helper drops fullscreen back to the 48-row windowed canvas. The
+ * progress bar sits at y=46, so on a windowed canvas its lower half would be
+ * clipped off-screen. Re-enable fullscreen here so the hashing bar, and every
+ * other progress screen, renders on the full 128x64 display. See the canvas
+ * note in mtp_app.h.
+ */
 void scr_connecting_draw(void)
 {
+    (void)jpp_sdk_canvas_fullscreen(mtp_app_ctx(), true);
     ui_screen_progress("Connecting", s_step[0] != '\0' ? s_step : NULL, s_percent);
 }
 
-/* ---- Phone number -------------------------------------------------------- */
-
-void scr_phone_enter(void)
-{
-    if (s_phone[0] == '\0') {
-        /* Seed with a leading + so the required format is obvious. */
-        snprintf(s_phone, sizeof(s_phone), "+");
-    }
-    ui_kbd_init(&s_kbd, s_phone, sizeof(s_phone), "Your phone number");
-    s_kbd.digits_only = true;
-}
-
-void scr_phone_draw(void)
-{
-    ui_kbd_draw(&s_kbd);
-    ui_toast_draw();
-}
-
-void scr_phone_key(jpp_sdk_key_event_t ev)
-{
-    switch (ui_kbd_key(&s_kbd, ev)) {
-    case UI_KBD_CANCEL:
-        scr_mode_enter();
-        mtp_app_goto(SCR_MODE_PICK);
-        return;
-    case UI_KBD_COMMIT:
-        break;
-    default:
-        return;
-    }
-
-    if (strlen(s_phone) < 6) {
-        ui_toast("Number looks too short");
-        return;
-    }
-
-    snprintf(s_step, sizeof(s_step), "Sending code");
-    s_percent = -1;
-    mtp_app_goto(SCR_CONNECTING);
-    mtp_app_render_now();
-
-    mtp_login_result_t res = mtp_login_send_code(s_phone, &s_code_info);
-    switch (res) {
-    case MTP_LOGIN_CODE_SENT:
-        scr_code_enter(&s_code_info);
-        mtp_app_goto(SCR_CODE);
-        return;
-    case MTP_LOGIN_OK:
-        scr_dialogs_enter();
-        mtp_app_goto(SCR_DIALOGS);
-        return;
-    case MTP_LOGIN_FLOOD: {
-        char msg[48];
-        snprintf(msg, sizeof(msg), "Try again in %d s", mtp_login_flood_seconds());
-        mtp_app_set_error("Too many attempts", msg);
-        mtp_app_goto(SCR_ERROR);
-        return;
-    }
-    case MTP_LOGIN_BAD_PHONE:
-        ui_toast("Invalid number");
-        mtp_app_goto(SCR_PHONE);
-        return;
-    default:
-        mtp_app_set_error("Could not send code", mtp_login_error());
-        mtp_app_goto(SCR_ERROR);
-        return;
-    }
-}
-
-/* ---- Login code ---------------------------------------------------------- */
-
-void scr_code_enter(const mtp_code_info_t *info)
-{
-    if (info != NULL) {
-        s_code_info = *info;
-    }
-    s_code[0] = '\0';
-    ui_kbd_init(&s_kbd, s_code, sizeof(s_code), "Enter the code");
-    s_kbd.digits_only = true;
-}
-
 /* Where to look for the code, in the words the mobile clients use. */
-static const char *code_source(void)
+static const char *code_source(const mtp_code_info_t *info)
 {
-    switch (s_code_info.kind) {
+    switch (info->kind) {
     case MTP_CODE_APP:         return "Sent to your Telegram app";
     case MTP_CODE_SMS:         return "Sent by SMS";
     case MTP_CODE_CALL:        return "You will get a call";
@@ -315,161 +244,198 @@ static const char *code_source(void)
     }
 }
 
-void scr_code_draw(void)
+/*
+ * scr_login_run — phone, code, and (if needed) two-factor password, all via the
+ * App SDK's jpp_sdk_input(). Each step is a blocking modal: no key-queue drain,
+ * no mtp_client_pump() runs while it is up. That is an accepted tradeoff for
+ * this app — see ui_widgets.h for why every *other* screen avoids it — since
+ * nothing is connected yet during login (there is nothing to pump until the
+ * phone number is sent), and jpp_sdk_input() is the only entry surface the App
+ * SDK offers. Loops rather than recurses on "back"/retry so bouncing between
+ * steps cannot grow the stack.
+ */
+void scr_login_run(void)
 {
-    ui_kbd_draw(&s_kbd);
-    /*
-     * Overwrite the keyboard's title band with the delivery hint: on this screen
-     * knowing where the code went matters more than a title repeating what the
-     * keypad already shows.
-     */
-    ui_gfx_fill(0, 0, UI_W, 9, false);
-    (void)ui_gfx_text_ellipsis(1, 1, UI_W - 2, code_source(), true);
-    ui_gfx_hline(0, UI_W - 1, 9, true);
-    ui_toast_draw();
+    enum { STEP_PHONE, STEP_CODE, STEP_PASSWORD } step = STEP_PHONE;
+    mtp_code_info_t code_info;
+    memset(&code_info, 0, sizeof(code_info));
+    char code_title[40] = "Enter the code";
+
+    for (;;) {
+        jpp_sdk_ui_result_t res;
+
+        switch (step) {
+        case STEP_PHONE: {
+            char phone[24] = { 0 };
+            (void)jpp_sdk_input(mtp_app_ctx(), "Your phone number",
+                                s_phone[0] != '\0' ? s_phone : "+1234567890",
+                                JPP_SDK_INPUT_NUMBER, phone, sizeof(phone), &res);
+            if (res == JPP_SDK_UI_BACK) {
+                scr_mode_enter();
+                mtp_app_goto(SCR_MODE_PICK);
+                return;
+            }
+            /*
+             * The remembered number is shown to the user as the box's
+             * placeholder. jpp_sdk_input() never prefills the field, so
+             * confirming without typing anything comes back here as an empty
+             * string — which, when we have a remembered number, means "use the
+             * number that is already on screen".
+             */
+            if (phone[0] == '\0' && s_phone[0] != '\0') {
+                snprintf(phone, sizeof(phone), "%s", s_phone);
+            }
+            if (strlen(phone) < 6) {
+                continue;
+            }
+            snprintf(s_phone, sizeof(s_phone), "%s", phone);
+            mtp_log("login_phone");
+
+            snprintf(s_step, sizeof(s_step), "Sending code");
+            s_percent = -1;
+            mtp_app_goto(SCR_CONNECTING);
+            mtp_app_render_now();
+
+            switch (mtp_login_send_code(s_phone, &code_info)) {
+            case MTP_LOGIN_CODE_SENT:
+                mtp_log("login_code_sent");
+                snprintf(code_title, sizeof(code_title), "%s",
+                         code_source(&code_info));
+                step = STEP_CODE;
+                continue;
+            case MTP_LOGIN_OK:
+                scr_dialogs_enter();
+                mtp_app_goto(SCR_DIALOGS);
+                return;
+            case MTP_LOGIN_FLOOD: {
+                char msg[48];
+                mtp_log("login_flood");
+                snprintf(msg, sizeof(msg), "Try again in %d s",
+                         mtp_login_flood_seconds());
+                mtp_app_set_error("Too many attempts", msg);
+                mtp_app_goto(SCR_ERROR);
+                return;
+            }
+            case MTP_LOGIN_BAD_PHONE:
+                mtp_log("login_bad_phone");
+                continue;
+            default:
+                mtp_app_set_error("Could not send code", mtp_login_error());
+                mtp_app_goto(SCR_ERROR);
+                return;
+            }
+        }
+
+        case STEP_CODE: {
+            char code[12] = { 0 };
+            (void)jpp_sdk_input(mtp_app_ctx(), code_title, NULL,
+                                JPP_SDK_INPUT_NUMBER, code, sizeof(code), &res);
+            if (res == JPP_SDK_UI_BACK) {
+                step = STEP_PHONE;
+                continue;
+            }
+            if (strlen(code) < 4) {
+                continue;
+            }
+
+            snprintf(s_step, sizeof(s_step), "Signing in");
+            s_percent = -1;
+            mtp_app_goto(SCR_CONNECTING);
+            mtp_app_render_now();
+
+            switch (mtp_login_sign_in(code)) {
+            case MTP_LOGIN_OK:
+                mtp_log("login_signed_in");
+                scr_dialogs_enter();
+                mtp_app_goto(SCR_DIALOGS);
+                return;
+            case MTP_LOGIN_NEEDS_PASSWORD:
+                mtp_log("login_needs_password");
+                step = STEP_PASSWORD;
+                continue;
+            case MTP_LOGIN_BAD_CODE:
+                mtp_log("login_bad_code");
+                continue;
+            case MTP_LOGIN_EXPIRED:
+                mtp_log("login_code_expired");
+                step = STEP_PHONE;
+                continue;
+            case MTP_LOGIN_NEEDS_SIGNUP:
+                mtp_log("login_needs_signup");
+                mtp_app_set_error("No account",
+                                  "This number has no account. Register on a phone first.");
+                mtp_app_goto(SCR_ERROR);
+                return;
+            default:
+                mtp_app_set_error("Sign-in failed", mtp_login_error());
+                mtp_app_goto(SCR_ERROR);
+                return;
+            }
+        }
+
+        case STEP_PASSWORD: {
+            /* The App SDK's on-screen keyboard has no masked/dots mode, so
+               the password is shown in the clear while typed — unlike the
+               previous custom keyboard. Accepted along with the rest of the
+               jpp_sdk_input() switch. */
+            char password[64] = { 0 };
+            const char *hint = mtp_login_password_hint();
+            char title[48];
+            snprintf(title, sizeof(title), "%s",
+                     hint[0] != '\0' ? hint : "Two-step password");
+            (void)jpp_sdk_input(mtp_app_ctx(), title, NULL,
+                                JPP_SDK_INPUT_TEXT, password, sizeof(password), &res);
+            if (res == JPP_SDK_UI_BACK) {
+                step = STEP_CODE;
+                continue;
+            }
+            if (password[0] == '\0') {
+                continue;
+            }
+
+            mtp_log("login_2fa_hashing");
+            /*
+             * The key derivation runs for several seconds and cannot be
+             * interrupted, so the screen switches to progress before it
+             * starts and srp_progress_cb keeps the bar moving from inside it.
+             */
+            snprintf(s_step, sizeof(s_step), "Checking password");
+            s_percent = 0;
+            mtp_app_goto(SCR_CONNECTING);
+            mtp_app_render_now();
+
+            mtp_login_result_t pres =
+                mtp_login_check_password(password, srp_progress_cb, NULL);
+
+            /* The plaintext password has served its purpose. */
+            memset(password, 0, sizeof(password));
+
+            switch (pres) {
+            case MTP_LOGIN_OK:
+                mtp_log("login_2fa_ok");
+                scr_dialogs_enter();
+                mtp_app_goto(SCR_DIALOGS);
+                return;
+            case MTP_LOGIN_BAD_PASSWORD:
+                mtp_log("login_2fa_bad");
+                continue;
+            case MTP_LOGIN_FLOOD: {
+                char msg[48];
+                mtp_log("login_2fa_flood");
+                snprintf(msg, sizeof(msg), "Try again in %d s",
+                         mtp_login_flood_seconds());
+                mtp_app_set_error("Too many attempts", msg);
+                mtp_app_goto(SCR_ERROR);
+                return;
+            }
+            default:
+                mtp_app_set_error("Sign-in failed", mtp_login_error());
+                mtp_app_goto(SCR_ERROR);
+                return;
+            }
+        }
+        }
+    }
 }
 
-void scr_code_key(jpp_sdk_key_event_t ev)
-{
-    /* RIGHT on the function row is a natural place for "resend", but the
-       keyboard owns RIGHT. Long-press BACK returns to the number instead. */
-    switch (ui_kbd_key(&s_kbd, ev)) {
-    case UI_KBD_CANCEL:
-        scr_phone_enter();
-        mtp_app_goto(SCR_PHONE);
-        return;
-    case UI_KBD_COMMIT:
-        break;
-    default:
-        return;
-    }
-
-    if (strlen(s_code) < 4) {
-        ui_toast("Code too short");
-        return;
-    }
-
-    snprintf(s_step, sizeof(s_step), "Signing in");
-    s_percent = -1;
-    mtp_app_goto(SCR_CONNECTING);
-    mtp_app_render_now();
-
-    switch (mtp_login_sign_in(s_code)) {
-    case MTP_LOGIN_OK:
-        scr_dialogs_enter();
-        mtp_app_goto(SCR_DIALOGS);
-        return;
-    case MTP_LOGIN_NEEDS_PASSWORD:
-        scr_password_enter();
-        mtp_app_goto(SCR_PASSWORD);
-        return;
-    case MTP_LOGIN_BAD_CODE:
-        ui_toast("Wrong code");
-        s_code[0] = '\0';
-        scr_code_enter(NULL);
-        mtp_app_goto(SCR_CODE);
-        return;
-    case MTP_LOGIN_EXPIRED:
-        ui_toast("Code expired");
-        scr_phone_enter();
-        mtp_app_goto(SCR_PHONE);
-        return;
-    case MTP_LOGIN_NEEDS_SIGNUP:
-        mtp_app_set_error("No account",
-                          "This number has no account. Register on a phone first.");
-        mtp_app_goto(SCR_ERROR);
-        return;
-    default:
-        mtp_app_set_error("Sign-in failed", mtp_login_error());
-        mtp_app_goto(SCR_ERROR);
-        return;
-    }
-}
-
-/* ---- Two-factor password ------------------------------------------------- */
-
-void scr_password_enter(void)
-{
-    s_password[0] = '\0';
-    ui_kbd_init(&s_kbd, s_password, sizeof(s_password), "Password");
-    s_kbd.password = true;
-}
-
-void scr_password_draw(void)
-{
-    ui_kbd_draw(&s_kbd);
-
-    /* Replace the title band with the lock and the account's own hint, which is
-       the only clue the user gets about which password this is. */
-    ui_gfx_fill(0, 0, UI_W, 9, false);
-    ui_gfx_bitmap(1, 1, ui_icon_lock.w, ui_icon_lock.h, ui_icon_lock.bits, true);
-    const char *hint = mtp_login_password_hint();
-    if (hint[0] != '\0') {
-        (void)ui_gfx_text_ellipsis(ui_icon_lock.w + 4, 1,
-                                   UI_W - ui_icon_lock.w - 6, hint, true);
-    } else {
-        (void)ui_gfx_text_ellipsis(ui_icon_lock.w + 4, 1,
-                                   UI_W - ui_icon_lock.w - 6,
-                                   "Two-step password", true);
-    }
-    ui_gfx_hline(0, UI_W - 1, 9, true);
-    ui_toast_draw();
-}
-
-void scr_password_key(jpp_sdk_key_event_t ev)
-{
-    switch (ui_kbd_key(&s_kbd, ev)) {
-    case UI_KBD_CANCEL:
-        scr_code_enter(NULL);
-        mtp_app_goto(SCR_CODE);
-        return;
-    case UI_KBD_COMMIT:
-        break;
-    default:
-        return;
-    }
-
-    if (s_password[0] == '\0') {
-        ui_toast("Enter your password");
-        return;
-    }
-
-    /*
-     * The key derivation runs for several seconds and cannot be interrupted, so
-     * the screen switches to progress before it starts and srp_progress_cb keeps
-     * the bar moving from inside it.
-     */
-    snprintf(s_step, sizeof(s_step), "Checking password");
-    s_percent = 0;
-    mtp_app_goto(SCR_CONNECTING);
-    mtp_app_render_now();
-
-    mtp_login_result_t res =
-        mtp_login_check_password(s_password, srp_progress_cb, NULL);
-
-    /* The plaintext password has served its purpose. */
-    memset(s_password, 0, sizeof(s_password));
-
-    switch (res) {
-    case MTP_LOGIN_OK:
-        scr_dialogs_enter();
-        mtp_app_goto(SCR_DIALOGS);
-        return;
-    case MTP_LOGIN_BAD_PASSWORD:
-        ui_toast("Wrong password");
-        scr_password_enter();
-        mtp_app_goto(SCR_PASSWORD);
-        return;
-    case MTP_LOGIN_FLOOD: {
-        char msg[48];
-        snprintf(msg, sizeof(msg), "Try again in %d s", mtp_login_flood_seconds());
-        mtp_app_set_error("Too many attempts", msg);
-        mtp_app_goto(SCR_ERROR);
-        return;
-    }
-    default:
-        mtp_app_set_error("Sign-in failed", mtp_login_error());
-        mtp_app_goto(SCR_ERROR);
-        return;
-    }
-}
+#pragma GCC visibility pop

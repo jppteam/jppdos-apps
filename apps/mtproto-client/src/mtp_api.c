@@ -6,6 +6,8 @@
 #include "mtp_schema.h"
 #include "mtp_time.h"
 
+#pragma GCC visibility push(hidden)
+
 bool mtp_api_write_input_peer(mtp_w_t *w, int peer_index)
 {
     const mtp_peer_t *p = mtp_peer_at(peer_index);
@@ -62,8 +64,14 @@ static void set_preview(char *dst, size_t cap, const char *src)
  * The messages vector that accompanies a dialogs page supplies each row's
  * preview. Walked before the dialogs themselves are displayed, and matched to
  * them by the conversation peer.
+ *
+ * Returns false when the vector could not be fully traversed — a top message
+ * that is a media object reaches mtp_skip's opaque field, which leaves the
+ * reader stranded mid-object. The previews already collected stand, but the
+ * caller must not continue past this point (the chats/users vectors would be
+ * read from the wrong offset), so the return value gates exactly that.
  */
-static void absorb_dialog_messages(mtp_r_t *r)
+static bool absorb_dialog_messages(mtp_r_t *r)
 {
     uint32_t n = mtp_r_vector(r);
     for (uint32_t i = 0u; i < n && mtp_r_ok(r); i++) {
@@ -93,9 +101,10 @@ static void absorb_dialog_messages(mtp_r_t *r)
             }
         }
         if (!ok) {
-            return;
+            return false;   /* reader is mid-object; nothing further is reachable */
         }
     }
+    return true;
 }
 
 mtp_err_t mtp_api_get_dialogs(void)
@@ -122,6 +131,9 @@ mtp_err_t mtp_api_get_dialogs(void)
     size_t res_len;
     mtp_err_t err = mtp_client_invoke(buf, w.len, &res, &res_len);
     if (err != MTP_OK) {
+        char ev[40];
+        snprintf(ev, sizeof(ev), "get_dialogs_fail_%d", (int)err);
+        mtp_log(ev);
         return err;
     }
 
@@ -150,12 +162,25 @@ mtp_err_t mtp_api_get_dialogs(void)
             return MTP_OK;   /* partial list is still worth showing */
         }
     }
-    absorb_dialog_messages(&r);
+    bool absorbed = absorb_dialog_messages(&r);
     if (!mtp_r_ok(&r)) {
         return MTP_OK;
     }
-    mtp_parse_chat_vector(&r);
-    mtp_parse_user_vector(&r);
+    /*
+     * Only when the messages vector was fully walked is the reader positioned
+     * at the start of the chats vector. If a media top message stranded it, the
+     * chats and users (carrying the names) can no longer be reached — reading
+     * them from the wrong offset would only corrupt the peer table, so stop.
+     */
+    if (absorbed) {
+        mtp_parse_chat_vector(&r);
+        mtp_parse_user_vector(&r);
+    }
+    {
+        char ev[40];
+        snprintf(ev, sizeof(ev), "get_dialogs_n_%d", mtp_dialogs_count());
+        mtp_log(ev);
+    }
     return MTP_OK;
 }
 
@@ -192,6 +217,9 @@ mtp_err_t mtp_api_get_history(int peer_index, int32_t offset_id,
     size_t res_len;
     mtp_err_t err = mtp_client_invoke(buf, w.len, &res, &res_len);
     if (err != MTP_OK) {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "get_history_fail_%d", (int)err);
+        mtp_log(ev);
         return err;
     }
 
@@ -285,6 +313,9 @@ mtp_err_t mtp_api_send_message(int peer_index, const char *text)
     size_t res_len;
     mtp_err_t err = mtp_client_invoke(buf, w.len, &res, &res_len);
     if (err != MTP_OK) {
+        char ev[48];
+        snprintf(ev, sizeof(ev), "send_message_fail_%d", (int)err);
+        mtp_log(ev);
         return err;
     }
 
@@ -380,3 +411,5 @@ mtp_err_t mtp_api_get_self(void)
     mtp_parse_user_vector(&r);
     return MTP_OK;
 }
+
+#pragma GCC visibility pop

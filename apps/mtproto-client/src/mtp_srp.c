@@ -12,6 +12,8 @@
 extern int crypto_hash_sha512(unsigned char *out, const unsigned char *in,
                               unsigned long long inlen);
 
+#pragma GCC visibility push(hidden)
+
 #define SHA512_BYTES 64u
 #define SHA512_BLOCK 128u
 
@@ -499,3 +501,5 @@ mtp_err_t mtp_srp_compute(const mtp_srp_params_t *params, const char *password,
     mtp_scratch_release(w);
     return err;
 }
+
+#pragma GCC visibility pop
