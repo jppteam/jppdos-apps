@@ -25,8 +25,8 @@
  * pair covers every device running this build. The api_hash is a 32-character
  * lowercase hex string.
  */
-#define MTP_TELEGRAM_API_ID   0u
-#define MTP_TELEGRAM_API_HASH "PUT_TELEGRAM_API_HASH_HERE"
+#define MTP_TELEGRAM_API_ID   28690885u
+#define MTP_TELEGRAM_API_HASH "b0f34bebbd7142cadbefb4a0a74ff4cb"
 
 /*
  * --- j++gram ----------------------------------------------------------------

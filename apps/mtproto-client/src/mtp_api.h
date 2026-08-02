@@ -17,10 +17,10 @@
 #include "mtp_model.h"
 
 /* One screen and a bit, in each case. Page sizes are tight on purpose — each
-   dialog drags its full user/chat record (about 700 bytes compressed at a
-   recent measurement), so the request must stay small enough that the reply fits
-   both the RX frame buffer and the inflate arena. See the note above. */
-#define MTP_DIALOG_PAGE  4
+   dialog drags its full user/chat record (measured 1.2 KB+ on a busy account,
+   so the reply is bounded at the request), requiring the reply to fit both the
+   RX frame buffer (~4 KB) and the inflate arena. See the note above. */
+#define MTP_DIALOG_PAGE  3
 #define MTP_HISTORY_PAGE 4
 
 /*

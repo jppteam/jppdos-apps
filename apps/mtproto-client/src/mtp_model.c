@@ -128,6 +128,12 @@ int mtp_dialog_find_peer(int peer_index)
     return -1;
 }
 
+bool mtp_dialog_is_archived_peer(int peer_index)
+{
+    int at = mtp_dialog_find_peer(peer_index);
+    return at >= 0 && s_dialogs[at].archived;
+}
+
 /* ---- Messages ------------------------------------------------------------ */
 
 void mtp_messages_clear(int peer_index)
@@ -411,6 +417,7 @@ static void dialog_visit(void *user, uint32_t ctor, unsigned field, uint8_t kind
     case MTP_F_DIALOG_READ_INBOX_MAX_ID:  d->read_inbox_max_id = (int32_t)peek_u32(r); break;
     case MTP_F_DIALOG_READ_OUTBOX_MAX_ID: d->read_outbox_max_id = (int32_t)peek_u32(r); break;
     case MTP_F_DIALOG_UNREAD_COUNT:       d->unread_count = (int32_t)peek_u32(r); break;
+    case MTP_F_DIALOG_FOLDER_ID:          d->archived = peek_u32(r) != 0u; break;
     default: break;
     }
 }

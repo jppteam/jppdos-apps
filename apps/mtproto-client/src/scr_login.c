@@ -93,7 +93,7 @@ void scr_welcome_key(jpp_sdk_key_event_t ev)
 
 void scr_mode_enter(void)
 {
-    ui_list_init(&s_mode_list, UI_STATUS_H + 2, UI_H - UI_STATUS_H - 4, 13);
+    ui_list_init(&s_mode_list, UI_STATUS_H + 2, UI_H - UI_STATUS_H - 4, 18);
     ui_list_set_count(&s_mode_list, MTP_MODE_COUNT);
     /* Start on whichever mode was used last, so a returning user just presses
        CENTER twice. */

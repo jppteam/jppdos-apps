@@ -2,7 +2,7 @@
   "schema_version": 2,
   "app_id": "mtproto_client",
   "app_type": "native",
-  "name": "MTProto",
+  "name": "Telegram",
   "version": "0.1.0",
   "author": "jppdos",
   "sdk_min": 3,

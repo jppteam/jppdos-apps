@@ -33,7 +33,7 @@ static bool      s_confirm_logout;
 
 void scr_settings_enter(void)
 {
-    ui_list_init(&s_list, UI_STATUS_H + 1, UI_H - UI_STATUS_H - 1, 13);
+    ui_list_init(&s_list, UI_STATUS_H + 1, UI_H - UI_STATUS_H - 1, 15);
     ui_list_set_count(&s_list, SET_COUNT);
     s_confirm_logout = false;
 }

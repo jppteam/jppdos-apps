@@ -25,7 +25,7 @@
 
 #pragma GCC visibility push(hidden)
 
-#define DIALOG_ROW_H 14
+#define DIALOG_ROW_H 15
 #define AVATAR_W     11
 
 static ui_list_t s_dialogs;
@@ -94,8 +94,8 @@ static void dialog_row(void *user, int index, int y, int row_h, bool selected)
                  d->unread_count > 99 ? "99+" : "%d", (int)d->unread_count);
         int bw = ui_font_width(badge) + 4;
         right -= bw;
-        ui_gfx_rfill(right, y + 8, bw, 8, true);
-        (void)ui_gfx_text(right + 2, y + 9, badge, false);
+        ui_gfx_rfill(right, y + 7, bw, 8, true);
+        (void)ui_gfx_text(right + 2, y + 8, badge, false);
         right -= 2;
     }
 
@@ -186,14 +186,15 @@ void scr_chat_enter(int peer_index)
     s_chat_scroll = 0;
     mtp_app_set_open_chat(peer_index);
 
-    if (mtp_messages_peer() != peer_index) {
-        mtp_messages_clear(peer_index);
-        s_chat_loading = true;
-        mtp_app_render_now();
-        int32_t stopped = 0;
-        (void)mtp_api_get_history(peer_index, 0, &stopped);
-        s_chat_loading = false;
-    }
+    /* Always fetch fresh history on entry. Re-entering a chat must not show the
+       stale cached list from a previous visit — new messages may have arrived
+       while the user was on the dialogs screen. */
+    mtp_messages_clear(peer_index);
+    s_chat_loading = true;
+    mtp_app_render_now();
+    int32_t stopped = 0;
+    (void)mtp_api_get_history(peer_index, 0, &stopped);
+    s_chat_loading = false;
 
     /* Clear the unread badge for what is now on screen. */
     const mtp_message_t *newest = mtp_message_at(mtp_messages_count() - 1);

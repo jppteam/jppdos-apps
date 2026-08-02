@@ -64,6 +64,7 @@ typedef struct {
     char     preview[MTP_PREVIEW_MAX];
     int16_t  peer;              /* index into the peer table, -1 if unresolved */
     bool     preview_out;       /* the last message is ours */
+    bool     archived;          /* in an archive/custom folder (folder_id != 0) */
 } mtp_dialog_t;
 
 typedef struct {
@@ -97,6 +98,10 @@ void mtp_dialogs_clear(void);
 int  mtp_dialogs_count(void);
 const mtp_dialog_t *mtp_dialog_at(int index);
 int  mtp_dialog_find_peer(int peer_index);
+
+/* True when the peer has a dialog and that dialog is in an archived/custom
+   folder (folder_id != 0) — a chat whose updates this client ignores. */
+bool mtp_dialog_is_archived_peer(int peer_index);
 
 /* ---- Messages ------------------------------------------------------------ */
 

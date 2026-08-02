@@ -65,6 +65,7 @@
 #define MTP_F_DIALOG_READ_INBOX_MAX_ID               6
 #define MTP_F_DIALOG_READ_OUTBOX_MAX_ID              7
 #define MTP_F_DIALOG_UNREAD_COUNT                    8
+#define MTP_F_DIALOG_FOLDER_ID                       12
 #define MTP_F_MESSAGE_ID                             17
 #define MTP_F_MESSAGE_FROM_ID                        18
 #define MTP_F_MESSAGE_PEER_ID                        21

@@ -48,6 +48,17 @@ static void absorb_message(const mtp_message_t *msg, int conversation_peer)
         return;
     }
 
+    /*
+     * Drop updates that belong to chats the UI does not show. getDialogs only
+     * returns the main (non-archived) folder, yet archived chats still push
+     * updates over the open connection. A message whose chat is not a known
+     * dialog — an archived chat, or one not seen yet — must not buzz or churn
+     * the list; the periodic dialog refresh will surface it if it is real.
+     */
+    if (mtp_dialog_find_peer(peer) < 0 || mtp_dialog_is_archived_peer(peer)) {
+        return;
+    }
+
     /* Only the open conversation keeps a message list; others just need their
        preview and unread count updating. */
     if (mtp_messages_peer() == peer) {
