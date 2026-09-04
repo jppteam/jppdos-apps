@@ -1,0 +1,469 @@
+# =============================================================================
+# Publishes the App Hub: builds every app in apps/, signs each package, and
+# uploads it with a plaintext index devices read to discover apps (issue #2).
+#
+# Layout produced under s3://<bucket>/<HUB_PREFIX>/ :
+#
+#     index                       plaintext index: every app in the Hub
+#     index.sig
+#     <app_id>/manifest.json      the app package, verbatim -- the same
+#     <app_id>/manifest.json.sig  directory deploy.py sends to
+#     <app_id>/<entry>            /sd/apps/<app_id>/ over serial
+#     <app_id>/<entry>.sig
+#
+# EVERY object has a detached `.sig` sibling: ECDSA P-256 / SHA-256, 64 raw
+# bytes of r || s. The bucket is read over plain HTTP by hardware too weak for
+# TLS, so the signature -- not the transport -- is what makes an app
+# trustworthy. The matching public key is hardcoded in the firmware and cannot
+# be rotated without a USB reflash.
+#
+# This is the App Hub half of the firmware repository's ota.yml, and the two
+# publish into one bucket for one parser. The wire contract they share -- the
+# storage convention above, the signature encoding, the index grammar -- is
+# specified in docs/ota-registry.md in the firmware repo; change it there
+# first. Same reason the tooling here mirrors that repo's ota_publish.py.
+#
+# An app removed from this repository drops out of the index on the next
+# publish, and its objects are then pruned from the bucket -- after the index
+# stops pointing at them, never before. This is the one place the App Hub needs
+# more than the firmware's OTA publisher, which never deletes: its images are
+# version-stamped and accumulate on purpose, while an app package lives at a
+# fixed path per app, so nothing else would ever clean one up.
+#
+# Configuration (all shared with the firmware's OTA publish unless overridden):
+#   vars.OTA_S3_BUCKET      | vars.S3_BUCKET            bucket name
+#   vars.HUB_S3_PREFIX                                  defaults to "jppdos-apps"
+#   vars.S3_ENDPOINT_URL                                defaults to Yandex
+#   vars.AWS_REGION                                     defaults to ru-central-1
+#   secrets.OTA_S3_ACCESS_KEY_ID     | secrets.S3_ACCESS_KEY_ID
+#   secrets.OTA_S3_SECRET_ACCESS_KEY | secrets.S3_SECRET_ACCESS_KEY
+#   secrets.OTA_SIGNING_KEY                             EC P-256 private key PEM
+#
+# The credentials need s3:ListBucket on the bucket plus s3:GetObject,
+# s3:PutObject and s3:DeleteObject under <HUB_PREFIX>/* -- delete included, for
+# the prune, and confined to this prefix so the firmware's cannot be touched.
+#
+# The bucket, the credentials and the signing key are deliberately the SAME
+# names as over there, because they are the same values -- one bucket, one key.
+# Only the prefix gets a name of its own: an org-wide OTA_S3_PREFIX meant for
+# the firmware must not be able to redirect app packages into /jppdos/.
+#
+# Publishing is off until configured: without the key or a bucket the publish
+# job warns and skips, so this workflow still builds and validates every app in
+# a checkout with no credentials. A manual run fails loudly instead.
+# =============================================================================
+name: app hub
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'apps/**'
+      - 'toolchain/**'
+      - 'tests/**'
+      - 'deploy.py'
+      - '.github/workflows/app-hub.yml'
+  # Pull requests build, index and test, but never sign or publish: the whole
+  # job that touches the signing key is skipped, so a fork PR cannot reach it.
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'toolchain/**'
+      - 'tests/**'
+      - 'deploy.py'
+      - '.github/workflows/app-hub.yml'
+  # Manual republish -- also the way to rebuild every app against a specific
+  # firmware revision after a firmware release, since a change over there
+  # pushes nothing here.
+  workflow_dispatch:
+    inputs:
+      jppdos_ref:
+        description: 'Firmware branch/tag/commit to build the SDK image from'
+        required: false
+        default: master
+
+concurrency:
+  # Never build the same ref twice at once. The publish job carries its own,
+  # stricter group -- see there.
+  group: app-hub-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # The firmware the SDK image is built against -- see toolchain/build-image.sh.
+  # master, because the SDK surface tracks the firmware's master and so does the
+  # docs site; workflow_dispatch can pin it to a release instead.
+  JPPDOS_REPO: https://github.com/jppteam/jppdos.git
+  JPPDOS_REF: ${{ github.event.inputs.jppdos_ref || 'master' }}
+
+jobs:
+  # The index format is a wire contract with firmware that cannot be updated in
+  # step with this repository, so it is pinned by tests and they gate the
+  # publish -- the same reason release.yml runs the host suite before it builds.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: python3 -m pip install --upgrade pip pytest cryptography
+
+      - name: Run the index and signature tests
+        run: python3 -m pytest tests -v --tb=short
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # The index stamps each app with the last commit that touched its
+          # sources, so an app nobody has changed keeps its original release
+          # date across republishes. A shallow clone would give every app the
+          # same commit -- the same reason docs.yml fetches everything.
+          fetch-depth: 0
+
+      # The SDK image is version-locked to a firmware commit, so the cache has
+      # to be keyed on the commit rather than on the ref. Resolved the same way
+      # build-image.sh resolves it, and for the same reason: a moving ref would
+      # otherwise keep serving whatever was cached the first time.
+      - name: Resolve firmware revision
+        id: fw
+        run: |
+          set -euo pipefail
+          LS=$(git ls-remote "$JPPDOS_REPO" "$JPPDOS_REF" "refs/tags/$JPPDOS_REF^{}" || true)
+          # An annotated tag lists twice -- the tag object and the peeled ^{}
+          # commit -- and it is the commit that gets built.
+          REV=$(printf '%s\n' "$LS" | grep '\^{}$' | head -1 | cut -f1 || true)
+          [ -n "$REV" ] || REV=$(printf '%s\n' "$LS" | head -1 | cut -f1)
+          # A ref that is already a raw SHA matches nothing and is used verbatim.
+          if [ -z "$REV" ]; then
+            case "$JPPDOS_REF" in
+              [0-9a-f]*) REV="$JPPDOS_REF" ;;
+              *) echo "::error::Cannot resolve '$JPPDOS_REF' in $JPPDOS_REPO."; exit 1 ;;
+            esac
+          fi
+          echo "rev=$REV" >> "$GITHUB_OUTPUT"
+          echo "firmware $JPPDOS_REF -> $REV"
+
+      # Building the image means a full firmware build inside espressif/idf --
+      # minutes, and a 12 GB pull. Most runs change an app and nothing else, so
+      # the finished ~340 MB image is cached and simply loaded back.
+      - name: Cache the SDK image
+        id: sdk-image
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/jppd-app-sdk.tar
+          key: jppd-app-sdk-${{ steps.fw.outputs.rev }}-${{ hashFiles('toolchain/Dockerfile', 'toolchain/capture_sysroot.py', 'toolchain/jppd-build', 'deploy.py') }}
+
+      # espressif/idf:v5.5.1 unpacks to ~12 GB and the firmware build adds more,
+      # against ~14 GB free on a stock runner. These trees are preinstalled
+      # toolchains (~10 GB) that nothing in this workflow uses.
+      - name: Free runner disk space
+        if: steps.sdk-image.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          df -h /
+
+      - name: Load or build the SDK image
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/jppd-app-sdk.tar" ]; then
+            echo "Cache hit -- loading jppd-app-sdk built from ${{ steps.fw.outputs.rev }}"
+            docker load -i "$RUNNER_TEMP/jppd-app-sdk.tar"
+          else
+            echo "Cache miss -- building jppd-app-sdk from ${{ steps.fw.outputs.rev }}"
+            # The resolved commit, not the ref: the image records what it was
+            # built from, and this is what the cache key promised.
+            JPPDOS_REF="${{ steps.fw.outputs.rev }}" toolchain/build-image.sh
+            docker save jppd-app-sdk -o "$RUNNER_TEMP/jppd-app-sdk.tar"
+          fi
+          docker run --rm --entrypoint cat jppd-app-sdk /opt/jppd-sdk/firmware-rev
+
+      - name: Build every app
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p dist
+          built=0
+          for app in apps/*/; do
+            id=$(basename "$app")
+            # apps/ may hold a directory that is not a buildable app -- a
+            # prebuilt drop, say. Skipping is right, but say so out loud.
+            if [ ! -f "$app/manifest.json" ]; then
+              echo "::warning::apps/$id has no manifest.json -- not published."
+              continue
+            fi
+            echo "::group::build $id"
+            # jppd-build stages into <out>/<app_id>/, so every app writes into
+            # one dist/ root. The manifest is validated against the firmware's
+            # own validator as part of this, which is what makes a schema
+            # mistake fail here rather than on a device.
+            docker run --rm \
+              -v "$PWD/$app:/app" \
+              -v "$PWD/dist:/out" \
+              jppd-app-sdk --out /out
+            echo "::endgroup::"
+            built=$((built + 1))
+          done
+          if [ "$built" -eq 0 ]; then
+            echo "::error::No apps were built -- nothing under apps/ has a manifest.json."
+            exit 1
+          fi
+          # The container runs as root, so its output lands root-owned; every
+          # step after this one runs as the runner user.
+          sudo chown -R "$(id -u):$(id -g)" dist
+          echo "Built $built app(s)."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install publishing dependencies
+        run: python3 -m pip install --upgrade pip cryptography
+
+      # Built here rather than in the publish job because this is where the git
+      # history is: the index records, per app, the last commit that touched it.
+      # Unlike the firmware's `latest`, it is written from scratch every run --
+      # every app is rebuilt every time, so there is no other channel's entry to
+      # preserve and nothing to merge into.
+      - name: Build the index
+        run: |
+          set -euo pipefail
+          python3 toolchain/hub_publish.py index-build \
+            --dist dist --repo . --out dist/index
+          {
+            echo '### App Hub index'
+            echo '```'
+            cat dist/index
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Unsigned: the signature is applied in the publish job, which is the only
+      # one that can see the key.
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-hub
+          path: dist/
+          retention-days: 14
+
+  publish:
+    # Pull requests build (so a broken app fails the PR) but never publish.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      # Keyed on the prefix, NOT the ref: every run rewrites the same `index`
+      # object, so two publishes at once would race there. Never cancel
+      # mid-publish.
+      group: app-hub-publish-${{ vars.HUB_S3_PREFIX || 'jppdos-apps' }}
+      cancel-in-progress: false
+    env:
+      BUCKET: ${{ vars.OTA_S3_BUCKET || vars.S3_BUCKET }}
+      PREFIX: ${{ vars.HUB_S3_PREFIX || 'jppdos-apps' }}
+      ENDPOINT: ${{ vars.S3_ENDPOINT_URL || 'https://storage.yandexcloud.net' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'ru-central-1' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.OTA_S3_ACCESS_KEY_ID || secrets.S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.OTA_S3_SECRET_ACCESS_KEY || secrets.S3_SECRET_ACCESS_KEY }}
+    steps:
+      # Hub publishing is additive: a repository that has not been given the
+      # signing key or the bucket yet should still build and check its apps.
+      # So a missing secret only skips the job on a push -- but is a hard error
+      # when a human asked for this run specifically.
+      - name: Preflight
+        id: pre
+        env:
+          HAVE_KEY: ${{ secrets.OTA_SIGNING_KEY != '' }}
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          [ -n "$BUCKET" ]  || MISSING="$MISSING OTA_S3_BUCKET/S3_BUCKET(variable)"
+          [ -n "${AWS_ACCESS_KEY_ID:-}" ] || MISSING="$MISSING S3_ACCESS_KEY_ID(secret)"
+          [ "$HAVE_KEY" = "true" ] || MISSING="$MISSING OTA_SIGNING_KEY(secret)"
+
+          if [ -z "$MISSING" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          if [ "$MANUAL" = "true" ]; then
+            echo "::error::App Hub publishing is not configured. Missing:$MISSING"
+            exit 1
+          fi
+          echo "::warning::App Hub publish skipped -- not configured. Missing:$MISSING"
+          echo "App Hub publish **skipped**: not configured (missing:$MISSING)." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # Only toolchain/hub_publish.py is needed here; the packages and the index
+      # come from the build job, so the default shallow checkout is enough.
+      - name: Check out repository
+        if: steps.pre.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: steps.pre.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install signing dependencies
+        if: steps.pre.outputs.ready == 'true'
+        run: python3 -m pip install --upgrade pip cryptography
+
+      - name: Download build output
+        if: steps.pre.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: app-hub
+          path: staging
+
+      # Verify immediately after signing, with the public key derived from the
+      # same private key: a bucket full of unverifiable objects is the one
+      # failure mode a device cannot recover from on its own.
+      - name: Sign and verify
+        if: steps.pre.outputs.ready == 'true'
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          mapfile -t FILES < <(find staging -type f ! -name '*.sig' | sort)
+          python3 toolchain/hub_publish.py sign   --key-env OTA_SIGNING_KEY "${FILES[@]}"
+          python3 toolchain/hub_publish.py verify --key-env OTA_SIGNING_KEY "${FILES[@]}"
+
+      # Order matters. The packages go up first and `index` last, so a device
+      # that reads the index never finds it pointing at an object that has not
+      # landed yet. (`index.sig` goes just before `index` for the same reason --
+      # the pair is consistent from the instant the new index appears.)
+      #
+      # A package is rewritten in place when its app changes, so unlike the
+      # firmware's version-stamped images it cannot be immutable; five minutes
+      # is long enough to serve one device's download of a whole app and short
+      # enough that a fix is not stuck behind a cache. The index has to be
+      # re-read to be useful at all, so it gets a minute.
+      - name: Upload to S3
+        if: steps.pre.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          DEST="s3://${BUCKET}/${PREFIX}"
+          PACKAGE='public, max-age=300'
+          VOLATILE='public, max-age=60, must-revalidate'
+
+          put() {
+            aws s3 cp "$1" "${DEST}/$2" \
+              --endpoint-url "$ENDPOINT" --no-progress \
+              --content-type "$3" --cache-control "$4"
+          }
+
+          # Each package file goes up AFTER its own signature. The firmware's
+          # images can be written the other way round because they are
+          # version-stamped and immutable; these are rewritten in place, so
+          # between the two writes a device would otherwise be able to fetch a
+          # new file against its old signature. That way round the pair only
+          # ever fails verification, which is a retry, never a bad install.
+          while IFS= read -r path; do
+            key="${path#staging/}"
+            case "$key" in
+              index)  continue ;;
+              *.json) ct='application/json' ;;
+              *)      ct='application/octet-stream' ;;
+            esac
+            put "$path.sig" "$key.sig" application/octet-stream "$PACKAGE"
+            put "$path"     "$key"     "$ct"                    "$PACKAGE"
+          done < <(find staging -type f ! -name '*.sig' | sort)
+
+          put staging/index.sig index.sig application/octet-stream "$VOLATILE"
+          put staging/index     index     'text/plain; charset=utf-8' "$VOLATILE"
+
+      # Whatever the new index no longer lists -- an app deleted from the
+      # repository, a renamed binary, a file an app stopped shipping. Last, and
+      # deliberately so: an object is removed only once nothing points at it, so
+      # a device that read the previous index a moment earlier still finds every
+      # file that index promised it.
+      #
+      # Listed and diffed rather than `sync --delete`: a sync would also decide
+      # for itself what to re-upload, and anything it did put back would carry
+      # default headers instead of the ones set above. This can only ever issue
+      # deletes, and it names each one in the log.
+      - name: Prune objects the index no longer lists
+        if: steps.pre.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          # What belongs in the bucket: every staged file, as a key.
+          KEEP=$(cd staging && find . -type f | sed 's|^\./||' | sort)
+          # A staging tree that came out empty means an earlier step went wrong
+          # in a way that did not fail; pruning against it would empty the
+          # prefix. There is no recovery from that but a re-run, so refuse.
+          if [ -z "$KEEP" ]; then
+            echo "::error::Nothing staged -- refusing to prune the whole prefix."
+            exit 1
+          fi
+
+          # An empty prefix answers "None". A listing that *fails* prunes
+          # nothing either way, but must not look the same: silence would hide
+          # a missing ListBucket grant for as long as it took someone to
+          # notice the bucket filling up. The publish itself is already done
+          # and correct by this point, so this warns rather than failing it.
+          if ! LIST=$(aws s3api list-objects-v2 \
+                        --bucket "$BUCKET" --prefix "${PREFIX}/" \
+                        --endpoint-url "$ENDPOINT" \
+                        --query 'Contents[].Key' --output text 2>&1); then
+            echo "::warning::Could not list ${PREFIX}/ to prune stale objects: $LIST"
+            exit 0
+          fi
+          HAVE=$(printf '%s' "$LIST" | tr '\t' '\n' | sed "s|^${PREFIX}/||" \
+                 | grep -v '^None$' | sort || true)
+
+          STALE=$(comm -13 <(printf '%s\n' "$KEEP") <(printf '%s\n' "$HAVE"))
+          if [ -z "$STALE" ]; then
+            echo "Nothing to prune."
+            exit 0
+          fi
+
+          pruned=0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            echo "pruning ${PREFIX}/${key}"
+            aws s3 rm "s3://${BUCKET}/${PREFIX}/${key}" --endpoint-url "$ENDPOINT"
+            pruned=$((pruned + 1))
+          done <<< "$STALE"
+          echo "pruned=$pruned" >> "$GITHUB_ENV"
+
+      - name: Summary
+        if: steps.pre.outputs.ready == 'true'
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          # The signing key is the whole chain of trust and replacing it bricks
+          # updates for every fielded device until it is reflashed over USB, so
+          # print the public half on every run: a swap should be impossible to
+          # make quietly, and this is the value that must match the array
+          # compiled into the firmware.
+          PUB=$(python3 toolchain/hub_publish.py pubkey-c \
+                  --key-env OTA_SIGNING_KEY --format hex)
+          APPS=$(sed -n 's/^apps //p' staging/index)
+          {
+            echo
+            echo "Published **$APPS app(s)** to \`s3://${BUCKET}/${PREFIX}/\`."
+            if [ "${pruned:-0}" -gt 0 ]; then
+              echo "Pruned $pruned object(s) no longer listed in the index."
+            fi
+            echo
+            echo "Signing key (raw X || Y, must match \`JPP_OTA_PUBKEY\` in the firmware):"
+            echo '```'
+            echo "$PUB"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

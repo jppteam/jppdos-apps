@@ -16,3 +16,9 @@ venv/
 
 # jppd-build output (one <app_id>/ dir per built app)
 dist/
+
+# OTA / App Hub signing key, if a copy is ever pulled down to sign by hand.
+# The private half lives in the OTA_SIGNING_KEY secret and nowhere else — it
+# cannot be rotated without reflashing every fielded device over USB.
+ota_seckey.pem
+ota_pubkey.pem
